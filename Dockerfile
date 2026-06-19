@@ -7,6 +7,7 @@ RUN apt-get update && apt-get install -y \
     ros-humble-ros2-controllers \
     ros-humble-foxglove-bridge \
     ros-humble-joint-state-publisher \
+    ros-humble-moveit \
     python3-colcon-common-extensions \
     && rm -rf /var/lib/apt/lists/*
 
