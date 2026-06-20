@@ -147,7 +147,8 @@ def main(args=None):
     except Exception as exc:
         # Surface config errors clearly instead of a bare traceback.
         print(f'[scene_publisher] startup failed: {exc}')
-        rclpy.shutdown()
+        if rclpy.ok():
+            rclpy.shutdown()
         raise
     try:
         rclpy.spin(node)   # keep latched markers alive for late subscribers
@@ -155,7 +156,10 @@ def main(args=None):
         pass
     finally:
         node.destroy_node()
-        rclpy.shutdown()
+        # On SIGINT (launch Shutdown), rclpy's signal handler has already shut
+        # the context down — calling shutdown() again raises. Guard with ok().
+        if rclpy.ok():
+            rclpy.shutdown()
 
 
 if __name__ == '__main__':

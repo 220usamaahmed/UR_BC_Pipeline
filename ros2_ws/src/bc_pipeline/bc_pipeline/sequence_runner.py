@@ -68,7 +68,9 @@ def main(args=None):
         code = run(node)
     finally:
         node.destroy_node()
-        rclpy.shutdown()
+        # Guard in case a SIGINT-triggered handler already shut the context down.
+        if rclpy.ok():
+            rclpy.shutdown()
     sys.exit(code)
 
 
