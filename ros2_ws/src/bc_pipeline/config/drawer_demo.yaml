@@ -1,0 +1,89 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Drawer demo — one self-contained experiment definition.
+#
+# A single config drives every node: the sequence_runner, the scene_publisher,
+# and the bag recorder (via the launch file).  Run with:
+#
+#   ros2 launch bc_pipeline record_sequence.launch.py config:=drawer_demo.yaml
+#
+# (UR driver + MoveIt + Foxglove must already be running.)
+# ─────────────────────────────────────────────────────────────────────────────
+
+robot:
+  planning_group: ur_manipulator
+  eef_link: tool0
+  base_frame: base_link
+  joint_names:
+    - shoulder_pan_joint
+    - shoulder_lift_joint
+    - elbow_joint
+    - wrist_1_joint
+    - wrist_2_joint
+    - wrist_3_joint
+
+planning:
+  velocity_scaling: 0.5
+  accel_scaling: 0.5
+  planning_time: 5.0
+
+# Named joint positions, reused by Checkpoint steps. Each list has one value per
+# robot.joint_names (6 here).
+checkpoints:
+  home:     [ 0.00, -1.57,  1.57, -1.57, -1.57, 0.0]
+  approach: [ 0.00, -1.57,  1.57, -1.57, -1.57, 0.0]
+  raised:   [ 0.00, -1.00,  0.50, -1.00, -1.57, 0.0]
+
+# The ordered sequence to execute. Steps run top-to-bottom; the first failure
+# aborts the run (non-zero exit) so the bag can be discarded.
+steps:
+  - type: Checkpoint
+    checkpoint: home
+
+  - type: Checkpoint
+    checkpoint: approach
+
+  # Pull: slide 10 cm along −Z of the tool (drawer pull), orientation locked.
+  - type: OrientationLockCheckpoint
+    frame: tool
+    axis: [0, 0, -1]
+    distance: 0.10
+
+  - type: Wait
+    duration: 1.0
+
+  - type: Gripper
+    action: on
+
+  # Push back: reverse the pull.
+  - type: OrientationLockCheckpoint
+    frame: tool
+    axis: [0, 0, 1]
+    distance: 0.10
+
+  - type: Gripper
+    action: off
+
+  - type: Checkpoint
+    checkpoint: home
+
+# Collision geometry: added to MoveIt's planning scene AND shown in Foxglove.
+# size/position are full side lengths and the box centre, in robot.base_frame.
+# color (r,g,b,a) affects Foxglove markers only.
+obstacles:
+  - id: table
+    size:     [1.2, 1.2, 0.02]
+    position: [0.0, 0.0, -0.01]
+    color:    [0.6, 0.6, 0.6, 0.8]
+  - id: wall
+    size:     [0.02, 1.0, 1.0]
+    position: [0.4, 0.0, 0.5]
+    color:    [0.8, 0.2, 0.2, 0.6]
+
+# What to record and where. bag_uri is a base path; the launch appends a
+# timestamp so every run gets a unique bag directory.
+recording:
+  bag_uri: runs/drawer
+  topics:
+    - /joint_states
+    - /tf
+    - /tf_static
