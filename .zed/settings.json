@@ -1,0 +1,37 @@
+{
+  "languages": {
+    "Python": {
+      // Disable pyright (Zed's default) — it runs locally and can't resolve ROS packages.
+      // pylsp runs inside the container where everything is installed.
+      "language_servers": ["pylsp", "!pyright"]
+    }
+  },
+  "lsp": {
+    "pylsp": {
+      "binary": {
+        "path": "docker",
+        "arguments": [
+          "exec", "-i", "ur3e_sim",
+          "bash", "-c",
+          "source /opt/ros/humble/setup.bash && pylsp -v 2>/tmp/pylsp.log"
+        ]
+      },
+      "settings": {
+        // Nested namespace (newer pylsp versions)
+        "pylsp": {
+          "plugins": {
+            "jedi": {
+              "environment": "/usr/bin/python3"
+            }
+          }
+        },
+        // Flat namespace (Ubuntu 22.04 apt pylsp 1.2.x reads this one)
+        "plugins": {
+          "jedi": {
+            "environment": "/usr/bin/python3"
+          }
+        }
+      }
+    }
+  }
+}

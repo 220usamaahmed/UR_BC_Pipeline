@@ -9,6 +9,7 @@ RUN apt-get update && apt-get install -y \
     ros-humble-joint-state-publisher \
     ros-humble-moveit \
     python3-colcon-common-extensions \
+    python3-pylsp \
     && rm -rf /var/lib/apt/lists/*
 
 # Source ROS automatically in every shell session
