@@ -31,6 +31,7 @@ setup(
         'console_scripts': [
             'sequence_runner = bc_pipeline.sequence_runner:main',
             'scene_publisher = bc_pipeline.scene_publisher:main',
+            'dummy_inference = bc_pipeline.dummy_inference:main',
         ],
     },
 )
