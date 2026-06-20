@@ -22,6 +22,7 @@ setup(
         'console_scripts': [
             'scene_builder          = ur_moveit_demo.scene_builder:main',
             'motion_planner         = ur_moveit_demo.motion_planner:main',
+            'plan_and_execute       = ur_moveit_demo.plan_and_execute:main',
             'obstacle_markers       = ur_moveit_demo.obstacle_markers:main',
             'constrained_cartesian  = ur_moveit_demo.constrained_cartesian:main',
         ],

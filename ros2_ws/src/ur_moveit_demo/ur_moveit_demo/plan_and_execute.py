@@ -36,7 +36,7 @@ SETTLE_SEC = 0.5
 MAX_ATTEMPTS = 3
 
 
-class SequenceRunner(Node):
+class PlanAndExecute(Node):
     def __init__(self):
         super().__init__('sequence_runner')
         self._plan_client = ActionClient(self, MoveGroup, 'move_action')
@@ -151,7 +151,7 @@ class SequenceRunner(Node):
 
 def main(args=None):
     rclpy.init(args=args)
-    node = SequenceRunner()
+    node = PlanAndExecute()
     try:
         node.run()
     finally:
