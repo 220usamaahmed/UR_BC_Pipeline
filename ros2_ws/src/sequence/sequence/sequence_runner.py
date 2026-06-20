@@ -4,7 +4,7 @@ import rclpy
 from rclpy.action import ActionClient
 from rclpy.node import Node
 
-from moveit_msgs.action import MoveGroup
+from moveit_msgs.action import MoveGroup, ExecuteTrajectory
 from moveit_msgs.msg import (
     Constraints,
     JointConstraint,
@@ -39,11 +39,12 @@ MAX_ATTEMPTS = 3
 class SequenceRunner(Node):
     def __init__(self):
         super().__init__('sequence_runner')
-        self._client = ActionClient(self, MoveGroup, 'move_action')
+        self._plan_client = ActionClient(self, MoveGroup, 'move_action')
+        self._exec_client = ActionClient(self, ExecuteTrajectory, 'execute_trajectory')
 
     def run(self):
         self.get_logger().info('Waiting for /move_group action server...')
-        while not self._client.server_is_ready():
+        while not self._plan_client.server_is_ready():
             rclpy.spin_once(self, timeout_sec=0.5)
         self.get_logger().info('Connected to move_group.')
 
@@ -63,8 +64,16 @@ class SequenceRunner(Node):
 
     def _move_to_with_retries(self, name: str, angles: list) -> bool:
         for attempt in range(1, MAX_ATTEMPTS + 1):
-            if self._move_to(name, angles):
-                return True
+            trajectory = self._plan_to(name, angles)
+            if trajectory is None:
+                self.get_logger().error(f'Could not plan to "{name}".')
+            else:
+                self._print_plan(trajectory)
+                input('\nPress Enter to execute (Ctrl-C to abort)...')
+                if self._execute(trajectory):
+                    return True
+                self.get_logger().error(f'Execution of "{name}" failed.')
+
             if attempt < MAX_ATTEMPTS:
                 self.get_logger().warn(
                     f'"{name}" failed (attempt {attempt}/{MAX_ATTEMPTS}); '
@@ -73,7 +82,7 @@ class SequenceRunner(Node):
                 time.sleep(SETTLE_SEC)
         return False
 
-    def _move_to(self, name: str, angles: list) -> bool:
+    def _plan_to(self, name, angles):
         request = MotionPlanRequest()
         request.group_name = PLANNING_GROUP
         request.allowed_planning_time = 5.0
@@ -93,40 +102,51 @@ class SequenceRunner(Node):
         request.goal_constraints = [goal_constraints]
 
         options = PlanningOptions()
-        options.plan_only = False
+        options.plan_only = True
 
         goal_msg = MoveGroup.Goal()
         goal_msg.request = request
         goal_msg.planning_options = options
 
-        self.get_logger().info('Sending to /move_group ...')
-        goal_future = self._client.send_goal_async(goal_msg)
+        goal_future = self._plan_client.send_goal_async(goal_msg)
         rclpy.spin_until_future_complete(self, goal_future)
-
         goal_handle = goal_future.result()
         if not goal_handle.accepted:
-            self.get_logger().error('Goal rejected by move_group.')
-            return False
+            return None
 
-        self.get_logger().info('Planning and executing ...')
+        result_future = goal_handle.get_result_async()
+        rclpy.spin_until_future_complete(self, result_future)
+        result = result_future.result().result
+
+        if result.error_code.val != 1:
+            self.get_logger().error(f'Plan failed: {result.error_code.val}')
+            return None
+
+        return result.planned_trajectory
+
+    def _print_plan(self, trajectory):
+        jt = trajectory.joint_trajectory
+        self.get_logger().info(f'Joints: {jt.joint_names}')
+        self.get_logger().info(f'Points: {len(jt.points)}')
+        for i, pt in enumerate(jt.points):
+            t = pt.time_from_start.sec + pt.time_from_start.nanosec * 1e-9
+            angles = [f'{p:+.3f}' for p in pt.positions]
+            self.get_logger().info(f'  [{i:02d}] t={t:5.2f}s  {angles}')
+
+    def _execute(self, trajectory):
+        goal = ExecuteTrajectory.Goal()
+        goal.trajectory = trajectory          # the RobotTrajectory from the plan
+        goal_future = self._exec_client.send_goal_async(goal)
+        rclpy.spin_until_future_complete(self, goal_future)
+        goal_handle = goal_future.result()
         result_future = goal_handle.get_result_async()
         rclpy.spin_until_future_complete(self, result_future)
 
         result = result_future.result().result
+        code = result.error_code.val
+        self.get_logger().info(f'Execute error code: {code}')
 
-        if result.error_code.val == 1:
-            pts = len(result.planned_trajectory.joint_trajectory.points)
-            self.get_logger().info(
-                f'Done. Trajectory: {pts} points, '
-                f'planning time: {result.planning_time:.2f} s'
-            )
-            return True
-
-        self.get_logger().error(
-            f'move_group error code: {result.error_code.val} '
-            f'(see moveit_msgs/MoveItErrorCodes.msg)'
-        )
-        return False
+        return result_future.result().result.error_code.val == 1
 
 
 def main(args=None):
