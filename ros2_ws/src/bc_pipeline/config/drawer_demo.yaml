@@ -27,11 +27,12 @@ planning:
   planning_time: 5.0
 
 # Named joint positions, reused by Checkpoint steps. Each list has one value per
-# robot.joint_names (6 here).
+# robot.joint_names (6 here). Values are in DEGREES; the config loader converts
+# them to radians for the controller.
 checkpoints:
-  home:     [ 0.00, -1.57,  1.57, -1.57, -1.57, 0.0]
-  approach: [ 0.00, -1.57,  1.57, -1.57, -1.57, 0.0]
-  raised:   [ 0.00, -1.00,  0.50, -1.00, -1.57, 0.0]
+  home:     [ 0.0, -90.0,  90.0, -90.0, -90.0, 0.0]
+  approach: [ 0.0, -90.0,  90.0, -90.0, -90.0, 0.0]
+  raised:   [ 0.0, -57.0,  29.0, -57.0, -90.0, 0.0]
 
 # The ordered sequence to execute. Steps run top-to-bottom; the first failure
 # aborts the run (non-zero exit) so the bag can be discarded.

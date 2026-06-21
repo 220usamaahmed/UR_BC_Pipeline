@@ -22,6 +22,7 @@ motion with the recorder already running.  Step-specific argument validation
 lives in each Step subclass (also at construction time, before execution).
 """
 
+import math
 import os
 
 import yaml
@@ -87,6 +88,10 @@ def _validate_planning(config: dict):
 
 
 def _validate_checkpoints(config: dict):
+    # Checkpoint joint values are authored in DEGREES (more human-readable than
+    # radians).  We validate and convert them to radians in place here, so every
+    # downstream consumer (Context, Checkpoint steps, MoveIt) keeps working in
+    # the radians the controller expects without having to know about the unit.
     checkpoints = _require_section(config, 'checkpoints', dict)
     n = len(config['robot']['joint_names'])
     for name, angles in checkpoints.items():
@@ -95,6 +100,13 @@ def _validate_checkpoints(config: dict):
                 f"checkpoint '{name}' must be a list of {n} joint values "
                 f"(one per robot.joint_names); got {angles!r}."
             )
+        if not all(isinstance(a, (int, float)) and not isinstance(a, bool)
+                   for a in angles):
+            raise ConfigError(
+                f"checkpoint '{name}' joint values must all be numbers "
+                f"(degrees); got {angles!r}."
+            )
+        checkpoints[name] = [math.radians(a) for a in angles]
 
 
 def _validate_steps(config: dict):
