@@ -78,16 +78,17 @@ obstacles:
     size: [0.02, 1.0, 1.0]
     position: [0.4, 0.0, 0.5]
     color: [0.8, 0.2, 0.2, 0.6]
-  - id: block
-    size: [0.1, 0.1, 0.1]
-    position: [-0.15, 0.15, 0.7]
-    color: [0.8, 0.8, 0.1, 0.6]
+  # - id: block
+  #   size: [0.075, 0.075, 0.075]
+  #   position: [-0.15, 0.15, 0.7]
+  #   color: [0.8, 0.8, 0.1, 0.6]
 
 # What to record and where. bag_uri is a base path; the launch appends a
 # timestamp so every run gets a unique bag directory.
-# recording:
-#   bag_uri: runs/drawer
-#   topics:
-#     - /joint_states
-#     - /tf
-#     - /tf_static
+recording:
+  bag_uri: runs/drawer
+  topics:
+    - /joint_states
+    - /tf
+    - /tf_static
+    - /robot_description
