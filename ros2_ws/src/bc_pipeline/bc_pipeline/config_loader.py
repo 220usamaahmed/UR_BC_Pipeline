@@ -140,7 +140,15 @@ def _validate_obstacles(config: dict):
 
 
 def _validate_recording(config: dict):
-    recording = _require_section(config, 'recording', dict)
+    # Recording is optional — omit the 'recording' section to run a sequence
+    # without capturing a bag (the launch file skips the recorder and warns).
+    if 'recording' not in config:
+        return
+    recording = config['recording']
+    if not isinstance(recording, dict):
+        raise ConfigError(
+            f"'recording' must be a dict; got {type(recording).__name__}."
+        )
     if 'bag_uri' not in recording:
         raise ConfigError("recording section is missing 'bag_uri'.")
     if not isinstance(recording.get('topics'), list) or not recording['topics']:

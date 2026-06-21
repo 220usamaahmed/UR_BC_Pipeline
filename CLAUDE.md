@@ -70,7 +70,8 @@ launch file (`launch/record_sequence.launch.py`) starts three things from the
    subscribers still get the (TRANSIENT_LOCAL) markers.
 2. `ros2 bag record` — records `recording.topics` to `recording.bag_uri` plus a
    timestamp suffix (e.g. `runs/drawer_2026-06-20_14-14-03`), so runs never
-   overwrite each other.
+   overwrite each other. Skipped (with a warning) if the config omits the
+   `recording` section — the sequence then runs unrecorded.
 3. `sequence_runner` — starts ~2 s later (so the bag is open and scene applied
    first), then executes the steps in order.
 
@@ -154,7 +155,8 @@ validated up front in `config_loader.py`:
   registered step.
 - `obstacles` — optional boxes (`id`, `size` = full side lengths, `position` =
   centre, optional `color` for Foxglove only), in `robot.base_frame`.
-- `recording` — `bag_uri` (base path; timestamp appended) and `topics` to record.
+- `recording` — optional; `bag_uri` (base path; timestamp appended) and `topics`
+  to record. Omit the whole section to run without recording (launch warns).
 
 **Validation philosophy:** structure is checked eagerly before anything moves;
 each Step validates its own args in `validate()` at construction time, also

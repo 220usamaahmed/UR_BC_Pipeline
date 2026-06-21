@@ -7,7 +7,8 @@ running in another terminal — this launch only adds the data-collection layer.
 FLOW
 ----
   scene_publisher  starts immediately (applies obstacles, latches markers, spins)
-  recorder         starts immediately (ros2 bag record)
+  recorder         starts immediately (ros2 bag record) — ONLY if the config has
+                   a 'recording' section; otherwise skipped with a warning
   sequence_runner  starts ~2 s later, so the bag is open and the planning scene
                    is populated before any motion begins
   on runner exit   Shutdown() SIGINTs the recorder, which flushes + closes the
@@ -37,6 +38,7 @@ from launch import LaunchDescription
 from launch.actions import (
     DeclareLaunchArgument,
     ExecuteProcess,
+    LogInfo,
     OpaqueFunction,
     RegisterEventHandler,
     Shutdown,
@@ -64,15 +66,10 @@ def launch_setup(context, *args, **kwargs):
 
     with open(config_path) as f:
         config = yaml.safe_load(f)
-    recording = config['recording']
 
-    stamp = datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
-    bag_uri = f"{recording['bag_uri']}_{stamp}"
-
-    recorder = ExecuteProcess(
-        cmd=['ros2', 'bag', 'record', '--output', bag_uri, *recording['topics']],
-        output='screen',
-    )
+    # Recording is optional. If the config has no 'recording' section, skip the
+    # bag recorder entirely and warn — the sequence still runs, just unrecorded.
+    recording = config.get('recording')
 
     scene = Node(
         package='bc_pipeline',
@@ -98,7 +95,24 @@ def launch_setup(context, *args, **kwargs):
         OnProcessExit(target_action=runner, on_exit=[Shutdown()])
     )
 
-    return [scene, recorder, delayed_runner, stop_on_done]
+    actions = [scene, delayed_runner, stop_on_done]
+
+    if recording is None:
+        actions.append(LogInfo(
+            msg='[record_sequence] WARNING: no "recording" section in config — '
+                'recording is DISABLED; the sequence will run without saving a bag.'
+        ))
+    else:
+        stamp = datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
+        bag_uri = f"{recording['bag_uri']}_{stamp}"
+        recorder = ExecuteProcess(
+            cmd=['ros2', 'bag', 'record',
+                 '--output', bag_uri, *recording['topics']],
+            output='screen',
+        )
+        actions.append(recorder)
+
+    return actions
 
 
 def generate_launch_description():
