@@ -126,6 +126,8 @@ dummy_inference.py   — policy stand-in (replays npz deltas)
 steps/
   base.py            — Step ABC, @register decorator, STEP_REGISTRY, build_step factory
   checkpoint.py      — Checkpoint: joint-space move to a named checkpoint
+                       (optional cartesian_offset → go straight to the
+                       checkpoint pose shifted by a metre vector)
   orientation_lock.py— OrientationLockCheckpoint: straight Cartesian slide, orientation fixed
   wait.py            — Wait: pause
   gripper.py         — Gripper: placeholder (logs + settle delay, no hardware yet)
