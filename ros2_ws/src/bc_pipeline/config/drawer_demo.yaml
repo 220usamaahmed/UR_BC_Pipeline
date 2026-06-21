@@ -14,12 +14,12 @@ robot:
   eef_link: tool0
   base_frame: base_link
   joint_names:
-    - shoulder_pan_joint
     - shoulder_lift_joint
     - elbow_joint
     - wrist_1_joint
     - wrist_2_joint
     - wrist_3_joint
+    - shoulder_pan_joint
 
 planning:
   velocity_scaling: 0.5
@@ -30,9 +30,8 @@ planning:
 # robot.joint_names (6 here). Values are in DEGREES; the config loader converts
 # them to radians for the controller.
 checkpoints:
-  home:     [ 0.0, -90.0,  90.0, -90.0, -90.0, 0.0]
-  approach: [ 0.0, -90.0,  90.0, -90.0, -90.0, 0.0]
-  raised:   [ 0.0, -57.0,  29.0, -57.0, -90.0, 0.0]
+  home: [-90.00, 0.00, -90.00, 0.00, 90.00, -0.00]
+  approach: [-108.18, -107.64, -150.28, -5.93, 94.92, -7.26]
 
 # The ordered sequence to execute. Steps run top-to-bottom; the first failure
 # aborts the run (non-zero exit) so the bag can be discarded.
@@ -46,7 +45,7 @@ steps:
   # Pull: slide 10 cm along −Z of the tool (drawer pull), orientation locked.
   - type: OrientationLockCheckpoint
     frame: tool
-    axis: [0, 0, -1]
+    axis: [0, 0, 1]
     distance: 0.10
 
   - type: Wait
@@ -58,7 +57,7 @@ steps:
   # Push back: reverse the pull.
   - type: OrientationLockCheckpoint
     frame: tool
-    axis: [0, 0, 1]
+    axis: [0, 0, -1]
     distance: 0.10
 
   - type: Gripper
@@ -72,19 +71,23 @@ steps:
 # color (r,g,b,a) affects Foxglove markers only.
 obstacles:
   - id: table
-    size:     [1.2, 1.2, 0.02]
+    size: [1.2, 1.2, 0.02]
     position: [0.0, 0.0, -0.01]
-    color:    [0.6, 0.6, 0.6, 0.8]
+    color: [0.6, 0.6, 0.6, 0.8]
   - id: wall
-    size:     [0.02, 1.0, 1.0]
+    size: [0.02, 1.0, 1.0]
     position: [0.4, 0.0, 0.5]
-    color:    [0.8, 0.2, 0.2, 0.6]
+    color: [0.8, 0.2, 0.2, 0.6]
+  - id: block
+    size: [0.1, 0.1, 0.1]
+    position: [-0.15, 0.15, 0.7]
+    color: [0.8, 0.8, 0.1, 0.6]
 
 # What to record and where. bag_uri is a base path; the launch appends a
 # timestamp so every run gets a unique bag directory.
-recording:
-  bag_uri: runs/drawer
-  topics:
-    - /joint_states
-    - /tf
-    - /tf_static
+# recording:
+#   bag_uri: runs/drawer
+#   topics:
+#     - /joint_states
+#     - /tf
+#     - /tf_static
