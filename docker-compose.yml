@@ -12,6 +12,9 @@ services:
     volumes:
       # Your ROS 2 workspace. Write nodes here on the host, run them in the container.
       - ./ros2_ws:/root/ros2_ws
+    environment:
+      - ROBOT_IP=192.168.56.101
+      - USE_FAKE_HARDWARE=true
     # Bring up the UR3e mock hardware and the Foxglove bridge automatically.
     command: ["/entrypoint.sh"]
     # Keep stdin/tty so you can also attach for debugging if needed.

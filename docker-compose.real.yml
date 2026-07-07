@@ -1,0 +1,14 @@
+services:
+  ur_sim:
+    # Real UR3e over the network — apply on top of docker-compose.yml:
+    #   ROBOT_IP=192.168.1.10 docker compose -f docker-compose.yml -f docker-compose.real.yml up --build
+    #
+    # network_mode: host is required so the driver's RTDE/TCP connection can
+    # reach the robot's subnet directly; the container no longer has its own
+    # bridged network, so the `ports:` mapping in docker-compose.yml has no
+    # effect here (foxglove_bridge is reachable on the host's 8765 instead).
+    network_mode: host
+    environment:
+      - ROBOT_IP=${ROBOT_IP:?Set ROBOT_IP to the real robot's address, e.g. ROBOT_IP=192.168.1.10}
+      - USE_FAKE_HARDWARE=false
+      - KINEMATICS_PARAMS_FILE=${KINEMATICS_PARAMS_FILE:-}
