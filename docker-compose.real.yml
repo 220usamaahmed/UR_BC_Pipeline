@@ -12,3 +12,19 @@ services:
       - ROBOT_IP=${ROBOT_IP:?Set ROBOT_IP to the real robot's address, e.g. ROBOT_IP=192.168.1.10}
       - USE_FAKE_HARDWARE=false
       - KINEMATICS_PARAMS_FILE=${KINEMATICS_PARAMS_FILE:-}
+
+    # Share the host's USB bus with the container
+    volumes:
+      - /dev:/dev
+      - /run/udev:/run/udev:ro
+      - /etc/udev/rules.d:/etc/udev/rules.d:ro
+      - /tmp/.X11-unix:/tmp/.X11-unix
+
+    # Expose the NVIDIA GPU/CUDA to the container
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]

@@ -111,3 +111,67 @@ python3 make_training_trajectory.py /root/ros2_ws/runs/drawer_2026-06-20_14-14-0
 ros2 run bc_pipeline dummy_inference --ros-args \
   -p run:=/root/ros2_ws/runs/drawer_2026-06-20_14-14-03
 ```
+
+---
+
+# ROS 2 packages for using Stereolabs ZED Camera cameras
+
+```bash
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+```bash
+
+sudo apt update
+sudo apt install wget
+
+sudo apt install zstd
+
+apt-get update && apt-get install -y libblas-dev liblapack-dev
+
+
+Reading package lists... Done
+Building dependency tree... Done
+Reading state information... Done
+You might want to run 'apt --fix-broken install' to correct these.
+The following packages have unmet dependencies:
+ libnvidia-decode : Depends: libnvidia-compute (= 610.43.02-1ubuntu1)
+ nvidia-driver : Depends: libnvidia-gl (= 610.43.02-1ubuntu1)
+                 Depends: libnvidia-compute (= 610.43.02-1ubuntu1)
+                 Depends: xserver-xorg-video-nvidia (= 610.43.02-1ubuntu1) but it is not going to be installed
+E: Unmet dependencies. Try 'apt --fix-broken install' with no packages (or specify a solution).
+
+apt --fix-broken install
+
+
+wget https://download.stereolabs.com/zedsdk/4.1/cu121/ubuntu22 -O ZED_SDK_Linux_Ubuntu22.run
+chmod +x ZED_SDK_Linux_Ubuntu22.run
+./ZED_SDK_Linux_Ubuntu22.run -- silent
+
+
+cd ~/ros2_ws/src/ #use your current ros2 workspace folder
+git clone https://github.com/stereolabs/zed-ros2-wrapper.git
+cd ..
+sudo apt update
+rosdep update
+rosdep install --from-paths src --ignore-src -r -y # install dependencies
+colcon build --symlink-install --cmake-args=-DCMAKE_BUILD_TYPE=Release --parallel-workers $(nproc) # build the workspace
+echo source $(pwd)/install/local_setup.bash >> ~/.bashrc # automatically source the installation in every new bash (optional)
+source ~/.bashrc
+```
