@@ -17,10 +17,3 @@ services:
     # Keep stdin/tty so you can also attach for debugging if needed.
     stdin_open: true
     tty: true
-
-  foxglove:
-    image: ghcr.io/foxglove/studio:latest
-    container_name: foxglove_studio
-    ports:
-      - "8080:8080"
-    restart: unless-stopped
