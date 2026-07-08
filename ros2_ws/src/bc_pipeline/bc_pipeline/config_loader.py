@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Config loader — reads and validates the single experiment YAML.
+Config loader — reads and validates the single experiment config.
 
 One config file describes a whole experiment:
 
@@ -14,6 +14,23 @@ One config file describes a whole experiment:
 Every node (sequence_runner, scene_publisher) and the launch file load the
 SAME file via a 'config' ROS parameter, so they can never drift apart.
 
+SOURCE FORMATS
+---------------
+A config is authored as either:
+
+  .yaml  — plain data, parsed with yaml.safe_load (as always).
+  .py    — a Python module defining a module-level `CONFIG` dict.  It is
+           executed, so it can use math, random, loops, etc. to build the
+           dict (e.g. randomised offsets for data augmentation).  It must
+           still describe the exact same schema a YAML file would.
+
+The launch file resolves whichever format is authored into a concrete,
+already-executed dict exactly ONCE, dumps it to a plain YAML file, and points
+every node at that resolved file — so two nodes independently loading a
+config with randomness in it can never see different values, and the
+resolved values get saved alongside the run for reproducibility. See
+resolve_source() below and record_sequence.launch.py.
+
 VALIDATION PHILOSOPHY
 ---------------------
 Validate structure here, eagerly, before anything moves.  A typo in a joint
@@ -22,6 +39,7 @@ motion with the recorder already running.  Step-specific argument validation
 lives in each Step subclass (also at construction time, before execution).
 """
 
+import importlib.util
 import math
 import os
 
@@ -32,20 +50,52 @@ class ConfigError(Exception):
     """Raised when the experiment config is missing or malformed."""
 
 
-def load_config(path: str) -> dict:
-    """Read, parse, and structurally validate the experiment config."""
+def resolve_source(path: str) -> dict:
+    """Parse a config file into a plain dict — no validation, no unit
+    conversion.  Handles both source formats (see module docstring).
+
+    This is the only place that needs to know a config might be Python
+    instead of YAML; load_config() and everything downstream just sees a
+    dict, exactly as before.
+    """
     if not path:
         raise ConfigError(
-            "No config path given. Set the 'config' ROS parameter to a YAML file."
+            "No config path given. Set the 'config' ROS parameter to a config file."
         )
     if not os.path.isfile(path):
         raise ConfigError(f"Config file not found: {path}")
 
-    with open(path) as f:
-        config = yaml.safe_load(f)
+    if path.endswith('.py'):
+        config = _exec_python_config(path)
+    else:
+        with open(path) as f:
+            config = yaml.safe_load(f)
 
     if not isinstance(config, dict):
         raise ConfigError(f"Config root must be a mapping; got {type(config).__name__}.")
+    return config
+
+
+def _exec_python_config(path: str) -> dict:
+    spec = importlib.util.spec_from_file_location('bc_pipeline_experiment_config', path)
+    if spec is None or spec.loader is None:
+        raise ConfigError(f"Could not load Python config '{path}'.")
+    module = importlib.util.module_from_spec(spec)
+    try:
+        spec.loader.exec_module(module)
+    except Exception as exc:
+        raise ConfigError(f"Error executing Python config '{path}': {exc}") from exc
+
+    if not hasattr(module, 'CONFIG'):
+        raise ConfigError(
+            f"Python config '{path}' must define a module-level 'CONFIG' dict."
+        )
+    return module.CONFIG
+
+
+def load_config(path: str) -> dict:
+    """Read, parse, and structurally validate the experiment config."""
+    config = resolve_source(path)
 
     _validate_robot(config)
     _validate_planning(config)
