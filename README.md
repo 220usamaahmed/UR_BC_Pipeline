@@ -168,3 +168,37 @@ source install/setup.bash
 ```bash
 ros2 launch zed_wrapper zed_camera.launch.py camera_model:=zed2i
 ```
+
+---
+
+# ECPMi suction gripper
+
+`ecpmi_gripper` (https://github.com/RoboticManipulation/ecpmi_gripper) controls
+the ECPMi suction gripper mounted on the UR3e's tool flange through the UR
+driver's IO controller (Tool Digital Output 1 by default). It lives under
+`ros2_ws/src/` like the other external packages here — bind-mounted, built
+inside the container. Its only deps (`rclpy`, `ur_msgs`) are already covered
+by the `ros-humble-ur` install in the Dockerfile, so no image changes were
+needed.
+
+### Build
+
+```bash
+cd /root/ros2_ws
+colcon build --packages-select ecpmi_gripper --symlink-install
+source install/setup.bash
+```
+
+### Run it
+
+Requires the real robot (`docker-compose.real.yml`) with the UR driver's IO
+controller active — the mock driver doesn't expose tool digital outputs.
+
+```bash
+# Start the service
+ros2 launch ecpmi_gripper suction_gripper.launch.py
+
+# Command it
+ros2 run ecpmi_gripper gripper_client grip     # or: release, blow
+```
+```

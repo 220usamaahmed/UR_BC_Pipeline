@@ -22,7 +22,7 @@ robot:
     - shoulder_pan_joint
 
 planning:
-  velocity_scaling: 0.5
+  velocity_scaling: 0.2
   accel_scaling: 0.5
   planning_time: 5.0
 
@@ -49,13 +49,19 @@ steps:
   - type: OrientationLockCheckpoint
     frame: tool
     axis: [0, 0, 1]
-    distance: 0.10
+    distance: 0.12
 
   - type: Wait
     duration: 1.0
 
   - type: Gripper
-    action: on
+    action: grip
+
+  - type: Wait
+    duration: 0.2
+
+  - type: Gripper
+    action: release
 
   # Push back: reverse the pull.
   - type: OrientationLockCheckpoint
@@ -64,7 +70,12 @@ steps:
     distance: 0.10
 
   - type: Gripper
-    action: off
+    action: blow
+
+  - type: OrientationLockCheckpoint
+    frame: tool
+    axis: [0, 0, -1]
+    distance: 0.02
 
   - type: Checkpoint
     checkpoint: home
@@ -88,10 +99,11 @@ obstacles:
 
 # What to record and where. bag_uri is a base path; the launch appends a
 # timestamp so every run gets a unique bag directory.
-# recording:
-#   bag_uri: runs/drawer
-#   topics:
-#     - /joint_states
-#     - /tf
-#     - /tf_static
-#     - /robot_description
+recording:
+  bag_uri: runs/drawer
+  topics:
+    - /joint_states
+    - /tf
+    - /tf_static
+    - /robot_description
+    # - /zed/zed_node/depth/depth_registered

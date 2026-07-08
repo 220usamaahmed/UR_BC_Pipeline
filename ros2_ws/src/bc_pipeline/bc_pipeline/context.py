@@ -26,6 +26,7 @@ import rclpy.time
 from rclpy.action import ActionClient
 
 import tf2_ros
+from ecpmi_gripper.srv import GripperControl
 from geometry_msgs.msg import Point, Pose, Quaternion
 from moveit_msgs.action import ExecuteTrajectory, MoveGroup
 from moveit_msgs.msg import (
@@ -69,6 +70,12 @@ class Context:
         # Forward kinematics: maps a set of joint angles to the EEF pose, so a
         # joint-space checkpoint can be combined with a Cartesian offset.
         self.fk_client = node.create_client(GetPositionFK, 'compute_fk')
+
+        # ecpmi_gripper's suction_gripper_controller (real hardware only — see
+        # its README). Not waited on in wait_for_servers(): most sequences run
+        # against the mock driver, which never brings this service up, so
+        # readiness is checked lazily the first time a Gripper step runs.
+        self.gripper_client = node.create_client(GripperControl, 'gripper_control')
 
         self.tf_buffer = tf2_ros.Buffer()
         self.tf_listener = tf2_ros.TransformListener(self.tf_buffer, node)
@@ -277,3 +284,20 @@ class Context:
             return True
         self.logger.error(f'Execution error code: {result.error_code.val}')
         return False
+
+    # ── suction gripper (used by Gripper) ────────────────────────────────────
+
+    def call_gripper(self, command: str, timeout_sec: float = 5.0) -> tuple:
+        """Call ecpmi_gripper's gripper_control service. Returns (success, message)."""
+        if not self.gripper_client.wait_for_service(timeout_sec=timeout_sec):
+            return False, 'gripper_control service not available (is ecpmi_gripper running?)'
+
+        request = GripperControl.Request()
+        request.command = command
+
+        future = self.gripper_client.call_async(request)
+        rclpy.spin_until_future_complete(self.node, future, timeout_sec=timeout_sec)
+        response = future.result()
+        if response is None:
+            return False, 'gripper_control service call timed out'
+        return response.success, response.message

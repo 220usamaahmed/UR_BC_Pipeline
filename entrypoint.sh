@@ -1,5 +1,6 @@
 #!/bin/bash
-# Starts the full stack: UR3e driver (mock or real) → MoveIt move_group → Foxglove bridge.
+# Starts the full stack: colcon build → UR3e driver (mock or real) → MoveIt
+# move_group → [real hardware only] suction gripper + ZED2i camera → Foxglove bridge.
 #
 # Env vars (set defaults for mock hardware; override for the real robot):
 #   ROBOT_IP           — IP of the real arm. Ignored when USE_FAKE_HARDWARE=true. (default: 192.168.56.101)
@@ -10,9 +11,14 @@ set -e
 
 source /opt/ros/humble/setup.bash
 
-if [ -f /root/ros2_ws/install/setup.bash ]; then
-  source /root/ros2_ws/install/setup.bash
-fi
+# Step 0 — build the workspace (bc_pipeline, ecpmi_gripper, zed-ros2-wrapper, ...).
+# ros2_ws is bind-mounted from the host, so build/install/log persist across
+# container restarts and this is an incremental (fast) build after the first run.
+echo "Building ROS 2 workspace..."
+cd /root/ros2_ws
+colcon build --symlink-install
+source install/setup.bash
+cd /root
 
 ROBOT_IP="${ROBOT_IP:-192.168.56.101}"
 USE_FAKE_HARDWARE="${USE_FAKE_HARDWARE:-true}"
@@ -49,6 +55,20 @@ ros2 launch ur_moveit_config ur_moveit.launch.py \
   launch_servo:=false &
 MG_PID=$!
 
-# Step 4 — Foxglove bridge (foreground — keeps the container alive and the
+# Step 4 — Suction gripper + ZED2i camera. Both need real hardware: the
+# gripper needs the UR driver's IO controller (mock hardware doesn't expose
+# tool digital outputs) and the camera needs the USB/GPU passthrough that
+# only docker-compose.real.yml provides. Skip both under mock hardware.
+if [ "${USE_FAKE_HARDWARE}" = "false" ]; then
+  echo "Real hardware detected — starting suction gripper and ZED2i camera..."
+
+  ros2 launch ecpmi_gripper suction_gripper.launch.py &
+  GRIPPER_PID=$!
+
+  ros2 launch zed_wrapper zed_camera.launch.py camera_model:=zed2i &
+  ZED_PID=$!
+fi
+
+# Step 5 — Foxglove bridge (foreground — keeps the container alive and the
 # background processes running as its children via the process group).
 exec ros2 launch foxglove_bridge foxglove_bridge_launch.xml
