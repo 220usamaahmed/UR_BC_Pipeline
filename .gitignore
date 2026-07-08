@@ -14,3 +14,5 @@ ros2_ws/downloads
 
 # Real-robot connection details (robot IP, calibration path) — machine-specific
 .env
+
+.venv
