@@ -250,6 +250,8 @@ class Context:
         req.max_step = max_step
         req.jump_threshold = 0.0   # disabled — safe for short straight slides
         req.avoid_collisions = True
+        req.max_velocity_scaling_factor = self.velocity_scaling
+        req.max_acceleration_scaling_factor = self.accel_scaling
 
         future = self.cartesian_client.call_async(req)
         rclpy.spin_until_future_complete(self.node, future)
