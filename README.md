@@ -114,64 +114,57 @@ ros2 run bc_pipeline dummy_inference --ros-args \
 
 ---
 
-# ROS 2 packages for using Stereolabs ZED Camera cameras
+# Stereolabs ZED2i camera
+
+CUDA 12.8 and the ZED SDK 5.0 are built into the Docker image (see
+`Dockerfile`) — you don't need to install anything by hand inside the
+container. The camera needs real USB hardware, so it's wired up through the
+same `docker-compose.real.yml` overlay used for the real UR arm:
 
 ```bash
+docker compose -f docker-compose.yml -f docker-compose.real.yml up --build
 ```
 
+That overlay adds `privileged: true` plus the `/dev`, `/run/udev`, and GPU
+passthrough the camera needs. Without `privileged`, camera opening fails fast
+with `CAMERA STREAM FAILED TO START` — the ZED SDK needs to manage USB
+power-management (autosuspend) around its USB3 video stream, which an
+unprivileged container's read-only `/sys` doesn't allow.
 
+### One-time setup: download the installers
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+The CUDA and ZED SDK installers are large (~4GB, ~2.4GB) and versioned, so
+they're kept out of git. Download them once into `ros2_ws/downloads/`
+(bind-mounted, gitignored — persists across rebuilds, never re-downloaded):
 
 ```bash
+mkdir -p ros2_ws/downloads && cd ros2_ws/downloads
 
-sudo apt update
-sudo apt install wget
+wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/cuda-ubuntu2204.pin
+wget https://developer.download.nvidia.com/compute/cuda/12.8.0/local_installers/cuda-repo-ubuntu2204-12-8-local_12.8.0-570.86.10-1_amd64.deb
+wget "https://download.stereolabs.com/zedsdk/5.0/cu12/ubuntu22" -O ZED_SDK_Ubuntu22_cuda12.8_tensorrt10.9_v5.0.0.zstd.run
+```
 
-sudo apt install zstd
+`docker compose ... up --build` then bakes both into the image. The
+Dockerfile also pre-fetches this specific camera's factory calibration file
+(serial `35477861`) at build time; pass `--build-arg
+ZED_CAMERA_SERIAL=<SN>` (from `ZED_Explorer -a`) if you're using a different
+physical camera.
 
-apt-get update && apt-get install -y libblas-dev liblapack-dev
+### Build the ROS 2 packages
 
+`zed-ros2-wrapper` (and its `zed-ros2-interfaces` submodule) live under
+`ros2_ws/src/` like `bc_pipeline` — bind-mounted, built inside the container:
 
-Reading package lists... Done
-Building dependency tree... Done
-Reading state information... Done
-You might want to run 'apt --fix-broken install' to correct these.
-The following packages have unmet dependencies:
- libnvidia-decode : Depends: libnvidia-compute (= 610.43.02-1ubuntu1)
- nvidia-driver : Depends: libnvidia-gl (= 610.43.02-1ubuntu1)
-                 Depends: libnvidia-compute (= 610.43.02-1ubuntu1)
-                 Depends: xserver-xorg-video-nvidia (= 610.43.02-1ubuntu1) but it is not going to be installed
-E: Unmet dependencies. Try 'apt --fix-broken install' with no packages (or specify a solution).
+```bash
+cd /root/ros2_ws
+rosdep update && rosdep install --from-paths src --ignore-src -r -y
+colcon build --symlink-install
+source install/setup.bash
+```
 
-apt --fix-broken install
+### Run it
 
-
-wget https://download.stereolabs.com/zedsdk/4.1/cu121/ubuntu22 -O ZED_SDK_Linux_Ubuntu22.run
-chmod +x ZED_SDK_Linux_Ubuntu22.run
-./ZED_SDK_Linux_Ubuntu22.run -- silent
-
-
-cd ~/ros2_ws/src/ #use your current ros2 workspace folder
-git clone https://github.com/stereolabs/zed-ros2-wrapper.git
-cd ..
-sudo apt update
-rosdep update
-rosdep install --from-paths src --ignore-src -r -y # install dependencies
-colcon build --symlink-install --cmake-args=-DCMAKE_BUILD_TYPE=Release --parallel-workers $(nproc) # build the workspace
-echo source $(pwd)/install/local_setup.bash >> ~/.bashrc # automatically source the installation in every new bash (optional)
-source ~/.bashrc
+```bash
+ros2 launch zed_wrapper zed_camera.launch.py camera_model:=zed2i
 ```

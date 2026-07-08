@@ -8,6 +8,7 @@ __pycache__/
 *.pyc
 
 ros2_ws/runs
+ros2_ws/downloads
 
 **/.DS_Store
 

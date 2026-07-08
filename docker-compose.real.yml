@@ -8,6 +8,11 @@ services:
     # bridged network, so the `ports:` mapping in docker-compose.yml has no
     # effect here (foxglove_bridge is reachable on the host's 8765 instead).
     network_mode: host
+    # The ZED2i needs full USB/power-management access (e.g. to manage
+    # autosuspend around its USB3 isochronous video stream) that an
+    # unprivileged container's read-only /sys doesn't allow — without this,
+    # `sl::Camera::open()` fails immediately with CAMERA STREAM FAILED TO START.
+    privileged: true
     environment:
       - ROBOT_IP=${ROBOT_IP:?Set ROBOT_IP to the real robot's address, e.g. ROBOT_IP=192.168.1.10}
       - USE_FAKE_HARDWARE=false
