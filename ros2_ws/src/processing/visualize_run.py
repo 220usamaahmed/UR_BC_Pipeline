@@ -3,10 +3,11 @@
 visualize_run.py — animate a run's depth frames alongside its joint traces.
 
 Reads the training_trajectory.npz written by make_training_trajectory.py and
-renders a synced side-by-side animation: the depth frame on the left, each
-joint's position trace on the right with a moving cursor marking "now". One
-video frame per saved sample, played back at rate_hz so the video runs at the
-same speed as the recording.
+renders a synced animation: the depth frame on the left, joint positions top
+right and joint deltas bottom right, each with a moving cursor marking "now".
+--draw_every subsamples which saved samples get rendered (default 20, i.e.
+every 20th) to speed up rendering; playback fps is scaled down to match, so
+the video's duration still matches the real recording — it's just choppier.
 
 Only needs numpy + matplotlib (no ROS), so this runs fine on the host inside
 the repo's .venv:
@@ -46,21 +47,30 @@ def find_npz(path: str) -> str:
                       f"make_training_trajectory.py on this run first.")
 
 
-def build_animation(data: dict):
+def build_animation(data: dict, draw_every: int):
     timestamps = data['timestamps']
     positions = data['positions']
+    deltas = data['deltas']
+    delta_times = timestamps[:-1]  # deltas[i] = positions[i+1] - positions[i]
     joint_names = [str(n) for n in data['joint_names']]
     depth = data.get('depth')
-    n_frames = len(timestamps)
-
     has_depth = depth is not None
-    fig, axes = plt.subplots(
-        1, 2 if has_depth else 1, figsize=(12 if has_depth else 6, 5))
-    ax_joints = axes[1] if has_depth else axes
+
+    frame_indices = np.arange(0, len(timestamps), draw_every)
+
+    fig = plt.figure(figsize=(12, 6) if has_depth else (6, 6))
+    if has_depth:
+        gs = fig.add_gridspec(2, 2, width_ratios=[1, 1])
+        ax_depth = fig.add_subplot(gs[:, 0])
+        ax_joints = fig.add_subplot(gs[0, 1])
+        ax_deltas = fig.add_subplot(gs[1, 1], sharex=ax_joints)
+    else:
+        gs = fig.add_gridspec(2, 1)
+        ax_joints = fig.add_subplot(gs[0, 0])
+        ax_deltas = fig.add_subplot(gs[1, 0], sharex=ax_joints)
 
     im = None
     if has_depth:
-        ax_depth = axes[0]
         depth_clean = np.where(np.isfinite(depth), depth, np.nan)
         vmin, vmax = np.nanmin(depth_clean), np.nanmax(depth_clean)
         cmap = matplotlib.colormaps['viridis'].copy()
@@ -71,24 +81,38 @@ def build_animation(data: dict):
         ax_depth.set_yticks([])
         fig.colorbar(im, ax=ax_depth, fraction=0.046, pad=0.04)
 
+    colors = plt.rcParams['axes.prop_cycle'].by_key()['color']
     for j, name in enumerate(joint_names):
-        ax_joints.plot(timestamps, positions[:, j], label=name, linewidth=1)
-    cursor = ax_joints.axvline(timestamps[0], color='black', linewidth=1.5)
-    ax_joints.set_xlabel('time (s)')
+        color = colors[j % len(colors)]
+        ax_joints.plot(timestamps, positions[:, j], label=name, linewidth=1, color=color)
+        ax_deltas.plot(delta_times, deltas[:, j], linewidth=1, color=color)
+
+    joint_cursor = ax_joints.axvline(timestamps[0], color='black', linewidth=1.5)
+    delta_cursor = ax_deltas.axvline(delta_times[0], color='black', linewidth=1.5)
+
     ax_joints.set_ylabel('position (rad)')
     ax_joints.set_title('Joint positions')
     ax_joints.legend(loc='upper right', fontsize='small')
+    ax_joints.tick_params(labelbottom=False)
+
+    ax_deltas.set_xlabel('time (s)')
+    ax_deltas.set_ylabel('delta (rad)')
+    ax_deltas.set_title('Joint deltas')
     fig.tight_layout()
 
+    last_delta_idx = len(delta_times) - 1
+
     def update(i):
-        artists = [cursor]
-        cursor.set_xdata([timestamps[i], timestamps[i]])
+        artists = [joint_cursor, delta_cursor]
+        joint_cursor.set_xdata([timestamps[i], timestamps[i]])
+        di = min(i, last_delta_idx)
+        delta_cursor.set_xdata([delta_times[di], delta_times[di]])
         if has_depth:
             im.set_data(depth_clean[i])
             artists.append(im)
         return artists
 
-    anim = FuncAnimation(fig, update, frames=n_frames, blit=False)
+    anim = FuncAnimation(fig, update, frames=frame_indices, blit=False)
     return fig, anim
 
 
@@ -97,17 +121,25 @@ def main():
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('run', help='Run directory, or a training_trajectory.npz path.')
     parser.add_argument('--output', help='Output video path (default: <run>/visualization.mp4)')
+    parser.add_argument('--draw_every', type=int, default=20,
+                         help='Render every Nth sample, to speed up rendering (default 20).')
     args = parser.parse_args()
+    if args.draw_every < 1:
+        raise SystemExit("--draw_every must be >= 1")
 
     npz_path = find_npz(args.run)
     run_dir = os.path.dirname(npz_path)
     data = np.load(npz_path)
     rate_hz = float(data['rate_hz'])
+    fps = rate_hz / args.draw_every
 
-    print(f"Loaded {npz_path}: {data['positions'].shape[0]} samples "
-          f"{'with' if 'depth' in data.files else 'without'} depth.")
+    n_samples = data['positions'].shape[0]
+    n_rendered = len(range(0, n_samples, args.draw_every))
+    print(f"Loaded {npz_path}: {n_samples} samples "
+          f"{'with' if 'depth' in data.files else 'without'} depth; "
+          f"rendering {n_rendered} of them (every {args.draw_every}) at {fps:.2f} fps.")
 
-    fig, anim = build_animation(data)
+    fig, anim = build_animation(data, args.draw_every)
 
     use_ffmpeg = shutil.which('ffmpeg') is not None
     if args.output:
@@ -117,10 +149,10 @@ def main():
         out_path = os.path.join(run_dir, f'{OUTPUT_STEM}.{ext}')
 
     if use_ffmpeg:
-        anim.save(out_path, writer='ffmpeg', fps=rate_hz, dpi=120)
+        anim.save(out_path, writer='ffmpeg', fps=fps, dpi=120)
     else:
         print("ffmpeg not found on PATH — falling back to an animated GIF.")
-        anim.save(out_path, writer=PillowWriter(fps=rate_hz), dpi=120)
+        anim.save(out_path, writer=PillowWriter(fps=fps), dpi=120)
 
     plt.close(fig)
     print(f"Saved {out_path}")
