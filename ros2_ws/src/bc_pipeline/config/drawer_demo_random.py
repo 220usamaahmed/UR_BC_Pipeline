@@ -20,6 +20,13 @@ PULL_DISTANCE = round(random.uniform(0.10, 0.18), 4)
 PUSH_BACK_1 = round(PULL_DISTANCE * (0.10 / 0.14), 4)
 PUSH_BACK_2 = round(PULL_DISTANCE - PUSH_BACK_1, 4)
 
+# Add 5 degree noise to home checkpoint joints
+HOME_BASE = [-90.00, 0.00, -90.00, 0.00, 90.00, -0.00]
+HOME_NOISY = [round(angle + random.uniform(-5, 5), 2) for angle in HOME_BASE]
+
+# Random cartesian offset in x direction (±3 cm max)
+APPROACH_OFFSET_X = round(random.uniform(-0.03, 0.03), 4)
+
 CONFIG = {
     'robot': {
         'planning_group': 'ur_manipulator',
@@ -40,12 +47,12 @@ CONFIG = {
         'planning_time': 5.0,
     },
     'checkpoints': {
-        'home': [-90.00, 0.00, -90.00, 0.00, 90.00, -0.00],
+        'home': HOME_NOISY,
         'approach': [-108.18, -107.64, -150.28, -5.93, 94.92, -7.26],
     },
     'steps': [
         {'type': 'Checkpoint', 'checkpoint': 'home'},
-        {'type': 'Checkpoint', 'checkpoint': 'approach'},
+        {'type': 'Checkpoint', 'checkpoint': 'approach', 'cartesian_offset': {'direction': [1, 0, 0], 'distance': APPROACH_OFFSET_X}},
         {'type': 'OrientationLockCheckpoint', 'frame': 'tool', 'axis': [0, 0, 1],
          'distance': PULL_DISTANCE},
         {'type': 'Wait', 'duration': 1.0},
