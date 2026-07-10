@@ -12,7 +12,9 @@ Pipeline:
   5. If present, read /zed/zed_node/depth/depth_registered and resample it
      onto the *same* grid (nearest depth frame to each grid tick), so every
      row of `depth` is the observation paired with that row of `positions`.
-  6. Save everything to <run>/training_trajectory.npz.
+  6. If present, read /bc_pipeline/current_step and sync step labels to the
+     same grid, so steps[i] is the step being executed at timestamps[i].
+  7. Save everything to <run>/training_trajectory.npz.
 
 The .npz holds (keys):
   joint_names : (J,)      column labels for the position/delta matrices
@@ -22,6 +24,8 @@ The .npz holds (keys):
   rate_hz     : scalar    the downsample rate
   depth       : (N, H, W) float32, metres — only present if the depth topic
                 was recorded; row i is synced to positions[i] (same grid tick)
+  steps       : (N,)      step labels (str) — only present if the current_step
+                topic was recorded; row i is the step at timestamps[i]
 
 Must run inside the container (ROS 2 sourced) — reading the bag needs the
 sensor_msgs definitions to deserialize the CDR payloads.
@@ -41,7 +45,9 @@ from inspect_run import find_bag_dir, load_metadata
 
 JOINT_STATE_TYPE = 'sensor_msgs/msg/JointState'
 DEPTH_IMAGE_TYPE = 'sensor_msgs/msg/Image'
+CURRENT_STEP_TYPE = 'std_msgs/msg/String'
 DEPTH_TOPIC = '/zed/zed_node/depth/depth_registered'
+CURRENT_STEP_TOPIC = '/bc_pipeline/current_step'
 RATE_HZ = 20.0
 OUTPUT_NAME = 'training_trajectory.npz'
 
@@ -65,6 +71,18 @@ def find_depth_topic(meta: dict):
                 raise SystemExit(
                     f"{DEPTH_TOPIC} has unexpected type {t['type']!r} "
                     f"(expected {DEPTH_IMAGE_TYPE!r}).")
+            return t
+    return None
+
+
+def find_current_step_topic(meta: dict):
+    """Return the current step topic's metadata entry, or None if it wasn't recorded."""
+    for t in meta['topics']:
+        if t['name'] == CURRENT_STEP_TOPIC:
+            if t['type'] != CURRENT_STEP_TYPE:
+                raise SystemExit(
+                    f"{CURRENT_STEP_TOPIC} has unexpected type {t['type']!r} "
+                    f"(expected {CURRENT_STEP_TYPE!r}).")
             return t
     return None
 
@@ -154,6 +172,33 @@ def read_depth_images(bag_dir: str, storage_id: str, topic: str):
     return np.asarray(times), np.stack(frames, axis=0)
 
 
+def read_current_steps(bag_dir: str, storage_id: str, topic: str):
+    """Read all step messages, returning (times, step_labels)."""
+    import rosbag2_py
+    from rclpy.serialization import deserialize_message
+    from rosidl_runtime_py.utilities import get_message
+
+    reader = rosbag2_py.SequentialReader()
+    reader.open(
+        rosbag2_py.StorageOptions(uri=bag_dir, storage_id=storage_id),
+        rosbag2_py.ConverterOptions('cdr', 'cdr'),
+    )
+    reader.set_filter(rosbag2_py.StorageFilter(topics=[topic]))
+
+    msg_cls = get_message(CURRENT_STEP_TYPE)
+    times, steps = [], []
+
+    while reader.has_next():
+        _topic, data, stamp = reader.read_next()
+        msg = deserialize_message(data, msg_cls)
+        steps.append(msg.data)
+        times.append(stamp * 1e-9)
+
+    if not steps:
+        raise SystemExit(f"No usable messages on {topic}.")
+    return np.asarray(times), np.asarray(steps)
+
+
 def nearest_indices(times: np.ndarray, abs_grid: np.ndarray) -> np.ndarray:
     """For each grid time, the index into (ascending) `times` of the closest sample."""
     right = np.clip(np.searchsorted(times, abs_grid), 1, len(times) - 1)
@@ -222,6 +267,24 @@ def main():
         print(f"Synced depth to the joint grid: mean offset {offsets.mean():.3f} s, "
               f"max offset {offsets.max():.3f} s.")
         save_kwargs['depth'] = down_depth
+
+    step_topic = find_current_step_topic(meta)
+    if step_topic is None:
+        print(f"No {CURRENT_STEP_TOPIC} topic in this bag — skipping steps.")
+    else:
+        step_times, step_labels = read_current_steps(
+            bag_dir, meta['storage_id'], step_topic['name'])
+        order = np.argsort(step_times)
+        step_times, step_labels = step_times[order], step_labels[order]
+        print(f"Read {len(step_labels)} {step_topic['name']} messages.")
+
+        # Sync steps to the same grid: each grid tick gets the current step label.
+        step_idx = nearest_indices(step_times, abs_grid)
+        down_steps = step_labels[step_idx]
+        offsets = np.abs(step_times[step_idx] - abs_grid)
+        print(f"Synced steps to the joint grid: mean offset {offsets.mean():.3f} s, "
+              f"max offset {offsets.max():.3f} s.")
+        save_kwargs['steps'] = down_steps
 
     out_path = os.path.join(bag_dir, OUTPUT_NAME)
     np.savez(out_path, **save_kwargs)

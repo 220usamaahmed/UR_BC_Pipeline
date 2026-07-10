@@ -8,6 +8,10 @@ joint's position trace on the right with a moving cursor marking "now". One
 video frame per saved sample, played back at rate_hz so the video runs at the
 same speed as the recording.
 
+If the .npz contains step information, the joint position graph shows colored
+background rectangles to mark which step was active during each time period,
+making it easy to correlate sensor data and joint motions with specific steps.
+
 Only needs numpy + matplotlib (no ROS), so this runs fine on the host inside
 the repo's .venv:
 
@@ -28,6 +32,7 @@ import matplotlib
 matplotlib.use('Agg')  # no display available when run headless / over SSH
 
 import matplotlib.pyplot as plt
+import matplotlib.patches as mpatches
 import numpy as np
 from matplotlib.animation import FuncAnimation, PillowWriter
 
@@ -46,11 +51,53 @@ def find_npz(path: str) -> str:
                       f"make_training_trajectory.py on this run first.")
 
 
+def build_step_rectangles(ax, timestamps, steps):
+    """Draw background rectangles for each step transition."""
+    if steps is None or len(steps) == 0:
+        return []
+
+    # Find step transitions: where the step label changes
+    step_changes = [0]  # first step always starts at time 0
+    for i in range(1, len(steps)):
+        if steps[i] != steps[i-1]:
+            step_changes.append(i)
+    step_changes.append(len(steps))  # end marker
+
+    # Generate colors for steps (cycle through a palette)
+    colors = plt.cm.Set3(np.linspace(0, 1, max(len(set(steps)), 3)))
+    step_color_map = {step: colors[i % len(colors)] for i, step in enumerate(sorted(set(steps)))}
+
+    rectangles = []
+    for i in range(len(step_changes) - 1):
+        start_idx = step_changes[i]
+        end_idx = step_changes[i + 1]
+        step_label = steps[start_idx]
+
+        x_start = timestamps[start_idx]
+        x_end = timestamps[end_idx - 1]
+
+        rect = mpatches.Rectangle(
+            (x_start, ax.get_ylim()[0]),
+            x_end - x_start,
+            ax.get_ylim()[1] - ax.get_ylim()[0],
+            linewidth=0,
+            edgecolor='none',
+            facecolor=step_color_map[step_label],
+            alpha=0.1,
+            zorder=0,
+        )
+        ax.add_patch(rect)
+        rectangles.append((rect, step_label))
+
+    return rectangles
+
+
 def build_animation(data: dict):
     timestamps = data['timestamps']
     positions = data['positions']
     joint_names = [str(n) for n in data['joint_names']]
     depth = data.get('depth')
+    steps = data.get('steps')
     n_frames = len(timestamps)
 
     has_depth = depth is not None
@@ -71,6 +118,11 @@ def build_animation(data: dict):
         ax_depth.set_yticks([])
         fig.colorbar(im, ax=ax_depth, fraction=0.046, pad=0.04)
 
+    # Draw step background rectangles
+    step_rectangles = []
+    if steps is not None:
+        step_rectangles = build_step_rectangles(ax_joints, timestamps, steps)
+
     for j, name in enumerate(joint_names):
         ax_joints.plot(timestamps, positions[:, j], label=name, linewidth=1)
     cursor = ax_joints.axvline(timestamps[0], color='black', linewidth=1.5)
@@ -78,6 +130,17 @@ def build_animation(data: dict):
     ax_joints.set_ylabel('position (rad)')
     ax_joints.set_title('Joint positions')
     ax_joints.legend(loc='upper right', fontsize='small')
+
+    # Add step legend if steps are present
+    if step_rectangles:
+        step_names = sorted(set(steps))
+        colors = plt.cm.Set3(np.linspace(0, 1, max(len(step_names), 3)))
+        step_patches = [mpatches.Patch(facecolor=colors[i % len(colors)],
+                                       label=step, alpha=0.5)
+                       for i, step in enumerate(step_names)]
+        ax_joints.legend(handles=ax_joints.get_legend_handles_labels()[0] + step_patches,
+                        loc='upper right', fontsize='small')
+
     fig.tight_layout()
 
     def update(i):

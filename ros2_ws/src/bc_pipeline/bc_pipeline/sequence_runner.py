@@ -50,6 +50,7 @@ def run(node: Node) -> int:
     node.get_logger().info(f'Running {total} step(s).')
     for i, step in enumerate(steps, 1):
         node.get_logger().info(f'\n{"=" * 52}\n[{i}/{total}] {step.label}')
+        ctx.publish_current_step(step.label)
         if not step.execute():
             node.get_logger().error(
                 f'Step {i}/{total} ({step.label}) failed — aborting sequence.'

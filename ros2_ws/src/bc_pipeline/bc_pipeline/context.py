@@ -40,6 +40,7 @@ from moveit_msgs.msg import (
 )
 from moveit_msgs.srv import GetCartesianPath, GetPositionFK
 from shape_msgs.msg import SolidPrimitive
+from std_msgs.msg import String
 
 
 class Context:
@@ -79,6 +80,18 @@ class Context:
 
         self.tf_buffer = tf2_ros.Buffer()
         self.tf_listener = tf2_ros.TransformListener(self.tf_buffer, node)
+
+        self.current_step_pub = node.create_publisher(
+            String, 'bc_pipeline/current_step', qos_profile=1
+        )
+
+    # ── step tracking ─────────────────────────────────────────────────────────
+
+    def publish_current_step(self, step_label: str):
+        """Publish the current step being executed."""
+        msg = String()
+        msg.data = step_label
+        self.current_step_pub.publish(msg)
 
     # ── readiness ─────────────────────────────────────────────────────────────
 
@@ -250,8 +263,6 @@ class Context:
         req.max_step = max_step
         req.jump_threshold = 0.0   # disabled — safe for short straight slides
         req.avoid_collisions = True
-        req.max_velocity_scaling_factor = self.velocity_scaling
-        req.max_acceleration_scaling_factor = self.accel_scaling
 
         future = self.cartesian_client.call_async(req)
         rclpy.spin_until_future_complete(self.node, future)
