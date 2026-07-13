@@ -24,6 +24,8 @@ services:
       - /run/udev:/run/udev:ro
       - /etc/udev/rules.d:/etc/udev/rules.d:ro
       - /tmp/.X11-unix:/tmp/.X11-unix
+      # External drive (optional, mounted only if it exists)
+      - ${EXTERNAL_DRIVE_PATH:+${EXTERNAL_DRIVE_PATH}:/data/external}
 
     # Expose the NVIDIA GPU/CUDA to the container
     deploy:

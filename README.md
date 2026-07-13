@@ -4,15 +4,57 @@ A ROS 2 pipeline to record scripted demonstrations on a UR3e manipulator and pro
 
 ## Setup
 
-### Start/stop Docker container
+### Quick start (using the start script)
+
+The `start-docker.sh` script handles container startup with support for both mock and real hardware modes, plus automatic external drive mounting.
+
+**Start the container (mock hardware by default):**
 ```bash
-docker compose up -d --build
+chmod +x start-docker.sh
+./start-docker.sh
+```
+
+**Start with real hardware:**
+```bash
+./start-docker.sh --real
+```
+
+**Shell into the running container:**
+```bash
+./start-docker.sh exec bash
+```
+
+**Run a command in the container:**
+```bash
+./start-docker.sh exec colcon build --packages-select bc_pipeline
+```
+
+**External drive (optional):**
+
+If an external drive exists at `/media/siddiquieu1/AHMED/new-ur3e-trajectories` on the host, it will automatically be mounted at `/data/external` inside the container. The script logs whether it found the drive or not when starting.
+
+**Stop the container:**
+Press `Ctrl+C` in the terminal where you ran `./start-docker.sh`, then:
+```bash
 docker compose down
 ```
 
-### Shell into container
+### Manual Docker commands (alternative)
+
+If you prefer to run docker directly without the script:
+
 ```bash
-docker exec -it ur3e_sim bash
+# Mock hardware (default)
+docker compose up --build
+
+# Real hardware
+docker compose -f docker-compose.yml -f docker-compose.real.yml up --build
+
+# Shell into running container
+docker compose exec -it ur_sim bash
+
+# Stop
+docker compose down
 ```
 
 ## Mock vs. real hardware
@@ -20,10 +62,17 @@ docker exec -it ur3e_sim bash
 By default `docker-compose.yml` brings up the UR3e **mock** driver
 (`use_fake_hardware:=true`) — no physical robot needed.
 
-To drive the **real** robot instead, layer `docker-compose.real.yml` on top and
-provide the robot's IP. Easiest way: copy `.env.example` to `.env` and fill in
-your robot's details — Docker Compose loads `.env` automatically, so you don't
-need to pass anything on the command line:
+**Using the start script (recommended):**
+```bash
+./start-docker.sh          # mock hardware (default)
+./start-docker.sh --real   # real hardware
+```
+
+**Manual setup (if not using the script):**
+
+To drive the **real** robot, layer `docker-compose.real.yml` on top and
+provide the robot's IP. Copy `.env.example` to `.env` and fill in your robot's 
+details — Docker Compose loads `.env` automatically:
 
 ```bash
 cp .env.example .env   # then edit ROBOT_IP (and KINEMATICS_PARAMS_FILE once you have one)
