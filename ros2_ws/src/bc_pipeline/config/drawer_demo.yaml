@@ -22,8 +22,8 @@ robot:
     - shoulder_pan_joint
 
 planning:
-  velocity_scaling: 0.1
-  accel_scaling: 0.1
+  velocity_scaling: 0.2
+  accel_scaling: 0.2
   planning_time: 5.0
 
 # Named joint positions, reused by Checkpoint steps. Each list has one value per
@@ -100,8 +100,8 @@ obstacles:
     position: [0.0, -0.1, 0.5]
     color: [0.8, 0.2, 0.2, 0.6]
   - id: drawer
-    size: [0.6, 0.2, 0.1]
-    position: [0.0, 0.46, 0.05]
+    size: [0.6, 0.4, 0.08]
+    position: [0.0, 0.30, 0.05]
     color: [0.2, 0.5, 0.8, 0.6]
   # - id: block
   #   size: [0.075, 0.075, 0.075]
