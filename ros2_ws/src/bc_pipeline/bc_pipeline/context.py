@@ -225,6 +225,28 @@ class Context:
             return None
         return response.pose_stamped[0].pose
 
+    # ── trajectory scaling ───────────────────────────────────────────────────────
+
+    def _scale_trajectory(self, robot_trajectory, velocity_scaling: float):
+        """Scale trajectory timing and velocities by velocity_scaling factor."""
+        if velocity_scaling <= 0:
+            return
+
+        for point in robot_trajectory.joint_trajectory.points:
+            # Scale time: velocity_scaling < 1 means slower, so multiply time by 1/scaling
+            total_ns = point.time_from_start.sec * 1_000_000_000 + point.time_from_start.nanosec
+            scaled_ns = int(total_ns / velocity_scaling)
+            point.time_from_start.sec = scaled_ns // 1_000_000_000
+            point.time_from_start.nanosec = scaled_ns % 1_000_000_000
+
+            # Scale velocities if present (they move slower too)
+            if point.velocities:
+                point.velocities = [v * velocity_scaling for v in point.velocities]
+
+            # Scale accelerations
+            if point.accelerations:
+                point.accelerations = [a * velocity_scaling for a in point.accelerations]
+
     # ── live EEF pose via TF (used by OrientationLockCheckpoint) ────────────────
 
     def get_eef_pose(self) -> Pose | None:
@@ -278,6 +300,8 @@ class Context:
                 f'(min {min_fraction:.1%}).'
             )
             return False
+
+        self._scale_trajectory(response.solution, self.velocity_scaling)
 
         exec_goal = ExecuteTrajectory.Goal()
         exec_goal.trajectory = response.solution
