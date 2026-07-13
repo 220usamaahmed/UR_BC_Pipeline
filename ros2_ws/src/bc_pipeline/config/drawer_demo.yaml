@@ -22,8 +22,8 @@ robot:
     - shoulder_pan_joint
 
 planning:
-  velocity_scaling: 0.2
-  accel_scaling: 0.5
+  velocity_scaling: 0.1
+  accel_scaling: 0.1
   planning_time: 5.0
 
 # Named joint positions, reused by Checkpoint steps. Each list has one value per
@@ -36,6 +36,9 @@ checkpoints:
 # The ordered sequence to execute. Steps run top-to-bottom; the first failure
 # aborts the run (non-zero exit) so the bag can be discarded.
 steps:
+  # - type: Checkpoint
+  #   checkpoint: approach
+
   - type: Checkpoint
     checkpoint: home
 
@@ -43,9 +46,9 @@ steps:
     checkpoint: approach
     # cartesian_offset:
     #   direction: [-1, 0, 0] # base_frame vector (need not be unit; normalised)
-    #   distance: 0.1 # metres
+    #   distance: 0.00 # metres
 
-  # Pull: slide 10 cm along −Z of the tool (drawer pull), orientation locked.
+  # Move towards drawer: slide 14 cm along Z of the tool, orientation locked.
   - type: OrientationLockCheckpoint
     frame: tool
     axis: [0, 0, 1]
@@ -67,7 +70,7 @@ steps:
   - type: OrientationLockCheckpoint
     frame: tool
     axis: [0, 0, -1]
-    distance: 0.10
+    distance: 0.13
 
   - type: Gripper
     action: blow
@@ -75,7 +78,7 @@ steps:
   - type: OrientationLockCheckpoint
     frame: tool
     axis: [0, 0, -1]
-    distance: 0.04
+    distance: 0.01
 
   - type: Checkpoint
     checkpoint: home
@@ -92,6 +95,14 @@ obstacles:
     size: [0.02, 1.0, 1.0]
     position: [0.4, 0.0, 0.5]
     color: [0.8, 0.2, 0.2, 0.6]
+  - id: back-wall
+    size: [0.6, 0.02, 1.0]
+    position: [0.0, -0.1, 0.5]
+    color: [0.8, 0.2, 0.2, 0.6]
+  - id: drawer
+    size: [0.6, 0.2, 0.1]
+    position: [0.0, 0.46, 0.05]
+    color: [0.2, 0.5, 0.8, 0.6]
   # - id: block
   #   size: [0.075, 0.075, 0.075]
   #   position: [-0.15, 0.15, 0.7]
@@ -99,11 +110,11 @@ obstacles:
 
 # What to record and where. bag_uri is a base path; the launch appends a
 # timestamp so every run gets a unique bag directory.
-recording:
-  bag_uri: runs/drawer
-  topics:
-    - /joint_states
-    - /tf
-    - /tf_static
-    - /robot_description
-    - /zed/zed_node/depth/depth_registered
+# recording:
+#   bag_uri: runs/drawer
+#   topics:
+#     - /joint_states
+#     - /tf
+#     - /tf_static
+#     - /robot_description
+#     - /zed/zed_node/depth/depth_registered
