@@ -17,7 +17,15 @@ FLOW
 CONFIG
 ------
 All three read the SAME config file.  The 'config' launch argument is a filename
-in bc_pipeline/config/ (or an absolute path):
+in bc_pipeline/config/ (or an absolute path), and may be a .yaml file (plain
+data) or a .py file (a module-level CONFIG dict, executed — lets an author use
+math/random to build the config). Either way this file resolves the source
+into a concrete dict EXACTLY ONCE here, dumps it to a plain resolved YAML file,
+and points scene_publisher + sequence_runner at that resolved file instead of
+the original path. This matters for .py sources: if each node re-executed the
+Python independently, any randomness in it would give them different values
+and they'd silently drift apart, which is exactly what "SAME config file" is
+supposed to prevent.
 
     ros2 launch bc_pipeline record_sequence.launch.py config:=drawer_demo.yaml
 
@@ -26,13 +34,22 @@ BAG NAMING
 recording.bag_uri from the config is a base path; a timestamp suffix is appended
 so every run is unique and nothing is ever overwritten, e.g.
     runs/drawer  ->  runs/drawer_2026-06-20_14-03-21
+
+When recording is enabled, the resolved config is also saved as
+runs/drawer_2026-06-20_14-03-21.yaml (a sibling of the bag directory, not
+inside it — ros2 bag record refuses to start if its output directory already
+exists) so a run with randomised values stays reproducible/debuggable later.
 """
 
 import datetime
 import os
+import shutil
+import tempfile
 
 import yaml
 from ament_index_python.packages import get_package_share_directory
+
+from bc_pipeline.config_loader import resolve_source
 
 from launch import LaunchDescription
 from launch.actions import (
@@ -64,8 +81,17 @@ def launch_setup(context, *args, **kwargs):
         LaunchConfiguration('config').perform(context)
     )
 
-    with open(config_path) as f:
-        config = yaml.safe_load(f)
+    # Resolve the source (.yaml data, or .py CONFIG executed) into a plain dict
+    # exactly once, then dump it to its own resolved YAML file. scene_publisher
+    # and sequence_runner both read THAT file rather than config_path, so a .py
+    # source with randomness in it can't give the two nodes different values.
+    config = resolve_source(config_path)
+
+    resolved_fd, resolved_path = tempfile.mkstemp(
+        prefix='bc_pipeline_resolved_', suffix='.yaml'
+    )
+    with os.fdopen(resolved_fd, 'w') as f:
+        yaml.safe_dump(config, f)
 
     # Recording is optional. If the config has no 'recording' section, skip the
     # bag recorder entirely and warn — the sequence still runs, just unrecorded.
@@ -75,14 +101,14 @@ def launch_setup(context, *args, **kwargs):
         package='bc_pipeline',
         executable='scene_publisher',
         output='screen',
-        parameters=[{'config': config_path}],
+        parameters=[{'config': resolved_path}],
     )
 
     runner = Node(
         package='bc_pipeline',
         executable='sequence_runner',
         output='screen',
-        parameters=[{'config': config_path}],
+        parameters=[{'config': resolved_path}],
     )
 
     # Delay the runner so the recorder has the bag open and the scene is applied
@@ -105,12 +131,24 @@ def launch_setup(context, *args, **kwargs):
     else:
         stamp = datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
         bag_uri = f"{recording['bag_uri']}_{stamp}"
+        topics = list(recording['topics']) + ['/bc_pipeline/current_step']
         recorder = ExecuteProcess(
             cmd=['ros2', 'bag', 'record',
-                 '--output', bag_uri, *recording['topics']],
+                 '--output', bag_uri, *topics],
             output='screen',
         )
         actions.append(recorder)
+
+        # Save the exact resolved config next to the bag (a sibling file, not
+        # inside the bag directory — ros2 bag record errors if its output
+        # directory already exists), so a run with randomised values stays
+        # reproducible/debuggable later.
+        resolved_copy = f"{bag_uri}.yaml"
+        os.makedirs(os.path.dirname(resolved_copy) or '.', exist_ok=True)
+        shutil.copyfile(resolved_path, resolved_copy)
+        actions.append(LogInfo(
+            msg=f'[record_sequence] Resolved config saved to {resolved_copy}'
+        ))
 
     return actions
 
@@ -120,7 +158,7 @@ def generate_launch_description():
         DeclareLaunchArgument(
             'config',
             default_value='drawer_demo.yaml',
-            description='Config YAML filename in bc_pipeline/config/ (or an absolute path).',
+            description='Config filename (.yaml or .py) in bc_pipeline/config/ (or an absolute path).',
         ),
         OpaqueFunction(function=launch_setup),
     ])

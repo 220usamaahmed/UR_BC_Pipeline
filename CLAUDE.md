@@ -145,8 +145,24 @@ DDS discovery is flaky.
 
 ## The config schema
 
-One YAML drives every node (see `config/drawer_demo.yaml`). Sections, all
-validated up front in `config_loader.py`:
+One config drives every node (see `config/drawer_demo.yaml`). A config is
+either a `.yaml` file (plain data) or a `.py` file that defines a
+module-level `CONFIG` dict — the `.py` form is executed, so it can use
+`math`/`random`/loops to build the config (e.g. randomised offsets for data
+augmentation; see `config/drawer_demo_random.py`). Either way it must
+describe the same sections below.
+
+`record_sequence.launch.py` resolves the source into a concrete dict exactly
+ONCE (`config_loader.resolve_source()`), dumps it to a plain resolved YAML
+file, and points `scene_publisher` + `sequence_runner` at that resolved file
+instead of the original — this is what keeps "every node reads the SAME
+config" true even when the source is a `.py` file with randomness in it (two
+independent `exec`s would otherwise give the two nodes different values). If
+recording is enabled, the resolved YAML is also saved as a sibling of the bag
+directory (`<bag_uri>_<timestamp>.yaml`), so a run with randomised values
+stays reproducible/debuggable later.
+
+Sections, all validated up front in `config_loader.py`:
 
 - `robot` — `planning_group`, `eef_link`, `base_frame`, `joint_names` (the
   canonical joint order; checkpoints must have one value each).

@@ -26,6 +26,7 @@ import rclpy.time
 from rclpy.action import ActionClient
 
 import tf2_ros
+from ecpmi_gripper.srv import GripperControl
 from geometry_msgs.msg import Point, Pose, Quaternion
 from moveit_msgs.action import ExecuteTrajectory, MoveGroup
 from moveit_msgs.msg import (
@@ -39,6 +40,7 @@ from moveit_msgs.msg import (
 )
 from moveit_msgs.srv import GetCartesianPath, GetPositionFK
 from shape_msgs.msg import SolidPrimitive
+from std_msgs.msg import String
 
 
 class Context:
@@ -70,8 +72,26 @@ class Context:
         # joint-space checkpoint can be combined with a Cartesian offset.
         self.fk_client = node.create_client(GetPositionFK, 'compute_fk')
 
+        # ecpmi_gripper's suction_gripper_controller (real hardware only — see
+        # its README). Not waited on in wait_for_servers(): most sequences run
+        # against the mock driver, which never brings this service up, so
+        # readiness is checked lazily the first time a Gripper step runs.
+        self.gripper_client = node.create_client(GripperControl, 'gripper_control')
+
         self.tf_buffer = tf2_ros.Buffer()
         self.tf_listener = tf2_ros.TransformListener(self.tf_buffer, node)
+
+        self.current_step_pub = node.create_publisher(
+            String, 'bc_pipeline/current_step', qos_profile=1
+        )
+
+    # ── step tracking ─────────────────────────────────────────────────────────
+
+    def publish_current_step(self, step_label: str):
+        """Publish the current step being executed."""
+        msg = String()
+        msg.data = step_label
+        self.current_step_pub.publish(msg)
 
     # ── readiness ─────────────────────────────────────────────────────────────
 
@@ -205,6 +225,28 @@ class Context:
             return None
         return response.pose_stamped[0].pose
 
+    # ── trajectory scaling ───────────────────────────────────────────────────────
+
+    def _scale_trajectory(self, robot_trajectory, velocity_scaling: float):
+        """Scale trajectory timing and velocities by velocity_scaling factor."""
+        if velocity_scaling <= 0:
+            return
+
+        for point in robot_trajectory.joint_trajectory.points:
+            # Scale time: velocity_scaling < 1 means slower, so multiply time by 1/scaling
+            total_ns = point.time_from_start.sec * 1_000_000_000 + point.time_from_start.nanosec
+            scaled_ns = int(total_ns / velocity_scaling)
+            point.time_from_start.sec = scaled_ns // 1_000_000_000
+            point.time_from_start.nanosec = scaled_ns % 1_000_000_000
+
+            # Scale velocities if present (they move slower too)
+            if point.velocities:
+                point.velocities = [v * velocity_scaling for v in point.velocities]
+
+            # Scale accelerations
+            if point.accelerations:
+                point.accelerations = [a * velocity_scaling for a in point.accelerations]
+
     # ── live EEF pose via TF (used by OrientationLockCheckpoint) ────────────────
 
     def get_eef_pose(self) -> Pose | None:
@@ -259,6 +301,8 @@ class Context:
             )
             return False
 
+        self._scale_trajectory(response.solution, self.velocity_scaling)
+
         exec_goal = ExecuteTrajectory.Goal()
         exec_goal.trajectory = response.solution
 
@@ -277,3 +321,20 @@ class Context:
             return True
         self.logger.error(f'Execution error code: {result.error_code.val}')
         return False
+
+    # ── suction gripper (used by Gripper) ────────────────────────────────────
+
+    def call_gripper(self, command: str, timeout_sec: float = 5.0) -> tuple:
+        """Call ecpmi_gripper's gripper_control service. Returns (success, message)."""
+        if not self.gripper_client.wait_for_service(timeout_sec=timeout_sec):
+            return False, 'gripper_control service not available (is ecpmi_gripper running?)'
+
+        request = GripperControl.Request()
+        request.command = command
+
+        future = self.gripper_client.call_async(request)
+        rclpy.spin_until_future_complete(self.node, future, timeout_sec=timeout_sec)
+        response = future.result()
+        if response is None:
+            return False, 'gripper_control service call timed out'
+        return response.success, response.message

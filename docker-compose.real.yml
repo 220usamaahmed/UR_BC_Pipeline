@@ -8,7 +8,30 @@ services:
     # bridged network, so the `ports:` mapping in docker-compose.yml has no
     # effect here (foxglove_bridge is reachable on the host's 8765 instead).
     network_mode: host
+    # The ZED2i needs full USB/power-management access (e.g. to manage
+    # autosuspend around its USB3 isochronous video stream) that an
+    # unprivileged container's read-only /sys doesn't allow — without this,
+    # `sl::Camera::open()` fails immediately with CAMERA STREAM FAILED TO START.
+    privileged: true
     environment:
       - ROBOT_IP=${ROBOT_IP:?Set ROBOT_IP to the real robot's address, e.g. ROBOT_IP=192.168.1.10}
       - USE_FAKE_HARDWARE=false
       - KINEMATICS_PARAMS_FILE=${KINEMATICS_PARAMS_FILE:-}
+
+    # Share the host's USB bus with the container
+    volumes:
+      - /dev:/dev
+      - /run/udev:/run/udev:ro
+      - /etc/udev/rules.d:/etc/udev/rules.d:ro
+      - /tmp/.X11-unix:/tmp/.X11-unix
+      # External drive (optional, mounted only if it exists)
+      - ${EXTERNAL_DRIVE_PATH:+${EXTERNAL_DRIVE_PATH}:/data/external}
+
+    # Expose the NVIDIA GPU/CUDA to the container
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]

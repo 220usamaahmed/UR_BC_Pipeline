@@ -12,6 +12,8 @@ services:
     volumes:
       # Your ROS 2 workspace. Write nodes here on the host, run them in the container.
       - ./ros2_ws:/root/ros2_ws
+      # External drive (optional, mounted only if it exists)
+      - ${EXTERNAL_DRIVE_PATH:+${EXTERNAL_DRIVE_PATH}:/data/external}
     environment:
       - ROBOT_IP=192.168.56.101
       - USE_FAKE_HARDWARE=true

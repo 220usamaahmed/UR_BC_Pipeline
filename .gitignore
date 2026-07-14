@@ -8,8 +8,11 @@ __pycache__/
 *.pyc
 
 ros2_ws/runs
+ros2_ws/downloads
 
 **/.DS_Store
 
 # Real-robot connection details (robot IP, calibration path) — machine-specific
 .env
+
+.venv
