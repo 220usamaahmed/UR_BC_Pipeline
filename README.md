@@ -155,6 +155,30 @@ cd /root/ros2_ws/src/processing
 python3 make_training_trajectory.py /root/ros2_ws/runs/drawer_2026-06-20_14-14-03
 ```
 
+**Process multiple runs at once:**
+```bash
+# Batch mode: scans all subdirectories and processes runs without training_trajectory.npz
+python3 make_training_trajectory.py /root/ros2_ws/runs --batch
+```
+
+### Visualize a run
+```bash
+cd /root/ros2_ws/src/processing
+python3 visualize_run.py /root/ros2_ws/runs/drawer_2026-06-20_14-14-03
+```
+
+Saves a video (or animated GIF if ffmpeg isn't available) showing depth frames
+alongside joint position traces with a moving cursor marking the current time.
+
+**Process multiple runs at once:**
+```bash
+# Batch mode: visualizes all runs with training_trajectory.npz but no visualization yet
+python3 visualize_run.py /root/ros2_ws/runs --batch
+
+# With custom sampling (render every 10th sample instead of every 20th)
+python3 visualize_run.py /root/ros2_ws/runs --batch --draw_every 10
+```
+
 ### Run dummy inference (policy stand-in)
 ```bash
 ros2 run bc_pipeline dummy_inference --ros-args \
@@ -250,4 +274,11 @@ ros2 launch ecpmi_gripper suction_gripper.launch.py
 # Command it
 ros2 run ecpmi_gripper gripper_client grip     # or: release, blow
 ```
+
+## Visualzing point clouds
+
+The camera seems to be flipped left right
+
+```bash
+ros2 run tf2_ros static_transform_publisher -0.05 1.0 0.5 1.571 0.0 0.0 base_link zed_left_camera_frame
 ```

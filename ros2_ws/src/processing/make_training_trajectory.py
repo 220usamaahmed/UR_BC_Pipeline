@@ -33,10 +33,17 @@ sensor_msgs definitions to deserialize the CDR payloads.
 USAGE
 -----
     python3 make_training_trajectory.py /root/ros2_ws/runs/drawer_2026-06-20_14-14-03
+
+    # Batch process all runs in a parent directory
+    python3 make_training_trajectory.py /root/ros2_ws/runs --batch
+
+    # Force reprocessing even if output already exists
+    python3 make_training_trajectory.py /root/ros2_ws/runs --batch --ignore-existing
 """
 
 import argparse
 import os
+import sys
 
 import numpy as np
 
@@ -199,6 +206,8 @@ def read_current_steps(bag_dir: str, storage_id: str, topic: str):
     return np.asarray(times), np.asarray(steps)
 
 
+
+
 def nearest_indices(times: np.ndarray, abs_grid: np.ndarray) -> np.ndarray:
     """For each grid time, the index into (ascending) `times` of the closest sample."""
     right = np.clip(np.searchsorted(times, abs_grid), 1, len(times) - 1)
@@ -220,13 +229,90 @@ def downsample(times: np.ndarray, positions: np.ndarray, rate_hz: float):
     return grid, positions[nearest], abs_grid
 
 
+def process_trajectory(save_kwargs: dict) -> dict:
+    """Process trajectory arrays by removing the first step if it's a Checkpoint to home.
+
+    Removes all samples that belong to the first step only if it is a Checkpoint
+    step with target "home". Otherwise returns the data unchanged.
+    """
+    processed = save_kwargs.copy()
+
+    # Only process if steps are available
+    if 'steps' not in processed or len(processed['steps']) == 0:
+        return processed
+
+    first_step = processed['steps'][0]
+
+    # Only remove first step if it's a Checkpoint to home (case-insensitive)
+    first_step_lower = first_step.lower()
+    if not ('checkpoint' in first_step_lower and 'home' in first_step_lower):
+        return processed
+
+    # Find indices where step is NOT the first step
+    keep_mask = processed['steps'] != first_step
+
+    # Apply mask to all position-aligned arrays
+    processed['positions'] = processed['positions'][keep_mask]
+    processed['timestamps'] = processed['timestamps'][keep_mask]
+    processed['steps'] = processed['steps'][keep_mask]
+
+    if 'depth' in processed:
+        processed['depth'] = processed['depth'][keep_mask]
+    if 'is_gripping' in processed:
+        processed['is_gripping'] = processed['is_gripping'][keep_mask]
+
+    # Recompute deltas from the filtered positions
+    if len(processed['positions']) > 1:
+        processed['deltas'] = np.diff(processed['positions'], axis=0)
+    else:
+        processed['deltas'] = np.array([]).reshape(0, processed['positions'].shape[1])
+
+    return processed
+
+
+def build_is_gripping(down_steps: np.ndarray) -> np.ndarray:
+    """Build a boolean array indicating gripper state from synced step labels.
+
+    Uses the synced step labels (down_steps) to ensure alignment with the grid.
+    Starts as False. 'grip' in label sets to True, 'blow' sets to False.
+    """
+    is_gripping = np.zeros(len(down_steps), dtype=bool)
+    current_gripping = False
+
+    for i, label in enumerate(down_steps):
+        label_lower = label.lower()
+        # Check 'blow' first because "Gripper" contains "grip"
+        if 'blow' in label_lower:
+            current_gripping = False
+        elif 'grip' in label_lower:
+            current_gripping = True
+        # 'release' is ignored
+        is_gripping[i] = current_gripping
+
+    return is_gripping
+
+
 def main():
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('bag', help='Bag directory or a storage file inside it.')
+    parser.add_argument('--batch', action='store_true',
+                        help='Treat bag as a parent path; scan subdirs and process all runs '
+                             'that don\'t yet have training_trajectory.npz.')
+    parser.add_argument('--ignore-existing', action='store_true',
+                        help='Reprocess even if training_trajectory.npz already exists.')
+    parser.add_argument('--render', action='store_true',
+                        help='Generate visualization after processing.')
     args = parser.parse_args()
 
-    bag_dir = find_bag_dir(args.bag)
+    if args.batch:
+        process_batch(args.bag, args.ignore_existing, args.render)
+    else:
+        process_single(args.bag, args.render)
+
+
+def process_single(bag_path, render=False):
+    bag_dir = find_bag_dir(bag_path)
     meta = load_metadata(bag_dir)
     topic = find_joint_states_topic(meta)
 
@@ -270,7 +356,7 @@ def main():
 
     step_topic = find_current_step_topic(meta)
     if step_topic is None:
-        print(f"No {CURRENT_STEP_TOPIC} topic in this bag — skipping steps.")
+        print(f"No {CURRENT_STEP_TOPIC} topic in this bag — skipping steps and gripper state.")
     else:
         step_times, step_labels = read_current_steps(
             bag_dir, meta['storage_id'], step_topic['name'])
@@ -286,9 +372,63 @@ def main():
               f"max offset {offsets.max():.3f} s.")
         save_kwargs['steps'] = down_steps
 
+        # Infer gripper state from synced step labels (ensures alignment)
+        is_gripping = build_is_gripping(down_steps)
+        n_gripping = np.sum(is_gripping)
+        print(f"Built is_gripping: {n_gripping}/{len(is_gripping)} grid points with gripper active.")
+
+        save_kwargs['is_gripping'] = is_gripping
+
+    # Process trajectory (e.g., remove first step)
+    save_kwargs = process_trajectory(save_kwargs)
+
     out_path = os.path.join(bag_dir, OUTPUT_NAME)
     np.savez(out_path, **save_kwargs)
     print(f"Saved {out_path}")
+
+    if render:
+        try:
+            import visualize_run
+            visualize_run.process_single(bag_dir, draw_every=20)
+        except Exception as e:
+            print(f"Warning: failed to render visualization: {e}")
+
+
+def process_batch(parent_path, ignore_existing=False, render=False):
+    """Scan parent_path for subdirectories and process runs without training_trajectory.npz."""
+    if not os.path.isdir(parent_path):
+        raise SystemExit(f"{parent_path} is not a directory.")
+
+    subdirs = sorted([
+        os.path.join(parent_path, d)
+        for d in os.listdir(parent_path)
+        if os.path.isdir(os.path.join(parent_path, d))
+    ])
+
+    if not subdirs:
+        print(f"No subdirectories found in {parent_path}")
+        return
+
+    to_process = []
+    for subdir in subdirs:
+        out_path = os.path.join(subdir, OUTPUT_NAME)
+        if os.path.exists(out_path) and not ignore_existing:
+            print(f"Skip {subdir} (already has {OUTPUT_NAME})")
+        else:
+            to_process.append(subdir)
+
+    if not to_process:
+        print(f"All {len(subdirs)} subdirectories already processed.")
+        return
+
+    print(f"Found {len(to_process)}/{len(subdirs)} runs to process.\n")
+
+    for i, run_path in enumerate(to_process, 1):
+        print(f"\n[{i}/{len(to_process)}] Processing {os.path.basename(run_path)}...")
+        try:
+            process_single(run_path, render)
+        except Exception as e:
+            print(f"ERROR processing {run_path}: {e}")
 
 
 if __name__ == '__main__':
