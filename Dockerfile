@@ -20,7 +20,9 @@ RUN apt-get update && apt-get install -y \
 RUN python3 -m pip install --no-cache-dir \
         torch==2.10.0 \
         --index-url https://download.pytorch.org/whl/cu128 \
-    && python3 -m pip install --no-cache-dir einops==0.8.1
+    && python3 -m pip install --no-cache-dir \
+        einops==0.8.1 \
+        matplotlib
 
 # --- Stereolabs ZED2i camera: ROS deps + CUDA + ZED SDK ---
 #

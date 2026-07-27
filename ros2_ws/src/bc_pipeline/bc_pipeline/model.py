@@ -775,20 +775,11 @@ class ImitationMoveitControl(Node):
             print(x[i])#/150.0)
             print("------------------")
         
-       # actions = x[].cpu().numpy()[:, :7]
+       
         random_idx = random.randint(0, num_predicted_actions - 1)
         idx = int(input(f"Select action sequence to execute (0-{num_predicted_actions - 1}): ").strip() or random_idx)
         
         actions = x[idx].cpu().numpy()[:, :7]
-        # print("Selected action sequence: ", actions / 150.0)
-      #  if self.flow_matching_policy.inference_step > 3:
-        executed_actions = actions[:10, :]*2.0
-        # joint_actions = executed_actions[:, :6] * np.pi / 180.0
-        # executed_actions[:, :6] = executed_actions[:, :6] / 150.0
-        print("chosen action  : ", executed_actions/2.0) 
-    #    input()
-        # print("")
+        executed_actions = actions[:10, :]
         
         return executed_actions.tolist()
-
-        return actions.tolist()

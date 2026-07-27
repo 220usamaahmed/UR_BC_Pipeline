@@ -173,6 +173,8 @@ def preprocess_depth(depth: np.ndarray) -> np.ndarray:
     inbetween_depth_value_object=np.percentile(inbetween_region_object,10)
     depth[object_start_x:object_end_x,object_start_y:object_end_y]=inbetween_depth_value_object
 
+    print(inbetween_depth_value_first_drawer, inbetween_depth_value_second_drawer, inbetween_depth_value_object)
+
     return depth.astype(np.float32, copy=False)
 
 
