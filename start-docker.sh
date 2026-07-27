@@ -55,8 +55,21 @@ if [ -d "$EXTERNAL_DRIVE" ]; then
     export EXTERNAL_DRIVE_PATH="$EXTERNAL_DRIVE"
     echo "✓ External drive found at $EXTERNAL_DRIVE"
 else
-    export EXTERNAL_DRIVE_PATH=""
     echo "⚠ External drive not found at $EXTERNAL_DRIVE"
+    echo "  Starting without the external drive mount"
+
+    # An empty EXTERNAL_DRIVE_PATH produces an invalid empty volume entry in
+    # Docker Compose. Use temporary copies with that optional mount removed.
+    TEMP_COMPOSE_DIR="$(mktemp -d)"
+    trap 'rm -rf "$TEMP_COMPOSE_DIR"' EXIT
+
+    FILTERED_COMPOSE_FILES=()
+    for file in "${COMPOSE_FILES[@]}"; do
+        filtered_file="$TEMP_COMPOSE_DIR/$(basename "$file")"
+        sed '/EXTERNAL_DRIVE_PATH/d' "$file" > "$filtered_file"
+        FILTERED_COMPOSE_FILES+=("$filtered_file")
+    done
+    COMPOSE_FILES=("${FILTERED_COMPOSE_FILES[@]}")
 fi
 
 # Build docker compose file arguments
@@ -70,8 +83,8 @@ echo ""
 
 if [ "$COMMAND" = "exec" ]; then
     # Execute a command in running container
-    docker compose "${COMPOSE_ARGS[@]}" exec -it ur_sim "$@"
+    docker compose --project-directory "$PWD" "${COMPOSE_ARGS[@]}" exec -it ur_sim "$@"
 else
     # Start the container
-    docker compose "${COMPOSE_ARGS[@]}" up --build
+    docker compose --project-directory "$PWD" "${COMPOSE_ARGS[@]}" up --build
 fi

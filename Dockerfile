@@ -11,8 +11,16 @@ RUN apt-get update && apt-get install -y \
     ros-humble-joint-state-publisher \
     ros-humble-moveit \
     python3-colcon-common-extensions \
+    python3-pip \
     python3-pylsp \
     && rm -rf /var/lib/apt/lists/*
+
+# Behaviour-cloning inference dependencies. The PyTorch wheel matches the
+# CUDA 12.8 toolkit installed below; torchvision/torchaudio are not needed.
+RUN python3 -m pip install --no-cache-dir \
+        torch==2.10.0 \
+        --index-url https://download.pytorch.org/whl/cu128 \
+    && python3 -m pip install --no-cache-dir einops==0.8.1
 
 # --- Stereolabs ZED2i camera: ROS deps + CUDA + ZED SDK ---
 #
