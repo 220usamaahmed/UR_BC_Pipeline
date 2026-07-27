@@ -56,18 +56,6 @@ def parse_args():
         default=0,
         help="random seed for the initial flow noise (default: 0)",
     )
-    parser.add_argument(
-        "--model-output-scale",
-        type=float,
-        default=2.0,
-        help="scale applied to raw model actions (default: 2.0)",
-    )
-    parser.add_argument(
-        "--joint-delta-divisor",
-        type=float,
-        default=150.0,
-        help="divisor converting model joint outputs to radians (default: 150)",
-    )
     return parser.parse_args()
 
 
@@ -167,7 +155,7 @@ def predict_actions(model, depth, observations, device, flow_steps, generator):
             depth_tensor, observation_tensor, predicted, next_time
         )
         actions += 0.5 * step_size * (velocity + next_velocity)
-    return actions[0].cpu().numpy()
+    return actions[0].cpu().numpy() / 20.0
 
 
 def evaluate(args, model, data, device):
@@ -187,6 +175,7 @@ def evaluate(args, model, data, device):
     generator = torch.Generator(device=device)
     generator.manual_seed(args.seed)
     indices, actual_chunks, predicted_chunks = [], [], []
+    actual_gripper_chunks, predicted_gripper_chunks = [], []
     current_observation_indices, current_depth_frames = [], []
     max_start = len(positions) - OBSERVATION_LENGTH
 
@@ -206,14 +195,16 @@ def evaluate(args, model, data, device):
         raw_prediction = predict_actions(
             model, depth, observations, device, args.flow_steps, generator
         )
-        predicted = (
-            raw_prediction[:, :6]
-            * args.model_output_scale
-            / args.joint_delta_divisor
-        )
+        # The policy was trained directly on the recorded joint deltas, so
+        # its first six outputs are already deltas in radians.
+        predicted = raw_prediction[:, :6]
         indices.append(np.arange(target_start, target_end))
         actual_chunks.append(deltas[target_start:target_end])
         predicted_chunks.append(predicted)
+        actual_gripper_chunks.append(gripping[target_start:target_end])
+        predicted_gripper_chunks.append(
+            (raw_prediction[:, 6] > 0.5).astype(np.float32)
+        )
         current_observation_indices.append(start + OBSERVATION_LENGTH - 1)
         current_depth_frames.append(depth[-1])
         print(
@@ -227,6 +218,8 @@ def evaluate(args, model, data, device):
         np.concatenate(indices),
         np.concatenate(actual_chunks),
         np.concatenate(predicted_chunks),
+        np.concatenate(actual_gripper_chunks),
+        np.concatenate(predicted_gripper_chunks),
         np.asarray(current_observation_indices),
         np.stack(current_depth_frames),
     )
@@ -236,6 +229,8 @@ def animate_comparison(
     indices,
     actual,
     predicted,
+    actual_gripper,
+    predicted_gripper,
     positions,
     timestamps,
     current_observation_indices,
@@ -244,8 +239,10 @@ def animate_comparison(
     rate_hz,
     output,
 ):
-    fig = plt.figure(figsize=(15, 15))
-    grid = fig.add_gridspec(4, 2, height_ratios=(1.25, 1, 1, 1))
+    fig = plt.figure(figsize=(15, 17))
+    grid = fig.add_gridspec(
+        5, 2, height_ratios=(1.25, 1, 1, 1, 0.8)
+    )
     depth_ax = fig.add_subplot(grid[0, 0])
     observation_ax = fig.add_subplot(grid[0, 1])
     delta_axes = [
@@ -253,6 +250,7 @@ def animate_comparison(
         for row in range(1, 4)
         for col in range(2)
     ]
+    gripper_ax = fig.add_subplot(grid[4, :])
 
     depth_artist = depth_ax.imshow(
         current_depth_frames[0],
@@ -310,13 +308,41 @@ def animate_comparison(
     delta_axes[0].legend()
     delta_axes[-2].set_xlabel("trajectory delta index")
     delta_axes[-1].set_xlabel("trajectory delta index")
+
+    gripper_ax.plot(
+        indices,
+        actual_gripper,
+        label="recorded",
+        linewidth=1.4,
+        drawstyle="steps-post",
+    )
+    gripper_ax.plot(
+        indices,
+        predicted_gripper,
+        label="model",
+        linewidth=1.1,
+        drawstyle="steps-post",
+    )
+    gripper_cursor = gripper_ax.axvline(
+        indices[0], color="black", linewidth=1.5
+    )
+    gripper_ax.axhline(
+        0.5, color="grey", linestyle="--", linewidth=0.8, label="threshold"
+    )
+    gripper_ax.set_title("Gripper state")
+    gripper_ax.set_xlabel("trajectory action index")
+    gripper_ax.set_ylabel("state")
+    gripper_ax.set_ylim(-0.1, 1.1)
+    gripper_ax.grid(alpha=0.25)
+    gripper_ax.legend(ncol=3)
+
     title = fig.suptitle("Recorded trajectory deltas vs model predictions")
     fig.tight_layout(rect=(0, 0, 1, 0.98))
 
     def update(frame):
-        chunk = frame // ACTION_HORIZON
-        observation_index = current_observation_indices[chunk]
-        depth_artist.set_data(current_depth_frames[chunk])
+        observation_index = current_observation_indices[frame]
+        delta_index = frame * ACTION_HORIZON
+        depth_artist.set_data(current_depth_frames[frame])
         depth_ax.set_title(
             f"Current depth (observation {observation_index})"
         )
@@ -324,24 +350,29 @@ def animate_comparison(
             [observation_x[observation_index]] * 2
         )
         for cursor in delta_cursors:
-            cursor.set_xdata([indices[frame]] * 2)
+            cursor.set_xdata([indices[delta_index]] * 2)
+        gripper_cursor.set_xdata([indices[delta_index]] * 2)
         title.set_text(
             "Recorded trajectory deltas vs model predictions "
-            f"(delta {indices[frame]})"
+            f"(actions {indices[delta_index]}–"
+            f"{indices[delta_index + ACTION_HORIZON - 1]})"
         )
         return [
             depth_artist,
             observation_cursor,
             *delta_cursors,
+            gripper_cursor,
             title,
         ]
 
-    interval_ms = 1000.0 / rate_hz if rate_hz > 0 else 50.0
+    animation_fps = (
+        rate_hz / ACTION_HORIZON if rate_hz > 0 else 1.0
+    )
     animation = FuncAnimation(
         fig,
         update,
-        frames=len(indices),
-        interval=interval_ms,
+        frames=len(current_observation_indices),
+        interval=1000.0 / animation_fps,
         blit=False,
     )
     output = output.expanduser().resolve()
@@ -350,8 +381,14 @@ def animate_comparison(
     output.parent.mkdir(parents=True, exist_ok=True)
     animation.save(
         output,
-        writer=PillowWriter(fps=rate_hz if rate_hz > 0 else 20.0),
+        writer=PillowWriter(fps=animation_fps),
         dpi=100,
+        progress_callback=lambda frame, total: print(
+            f"\rRendering GIF: {frame + 1}/{total} "
+            f"({100.0 * (frame + 1) / total:.0f}%)",
+            end="\n" if frame + 1 == total else "",
+            flush=True,
+        ),
     )
     plt.close(fig)
     return output
@@ -361,8 +398,6 @@ def main():
     args = parse_args()
     if args.flow_steps <= 0:
         raise ValueError("--flow-steps must be positive")
-    if args.joint_delta_divisor == 0:
-        raise ValueError("--joint-delta-divisor must be non-zero")
     if args.device == "auto":
         args.device = "cuda" if torch.cuda.is_available() else "cpu"
     device = torch.device(args.device)
@@ -376,6 +411,8 @@ def main():
             indices,
             actual,
             predicted,
+            actual_gripper,
+            predicted_gripper,
             current_observation_indices,
             current_depth_frames,
         ) = evaluate(args, model, data, device)
@@ -387,6 +424,8 @@ def main():
         indices,
         actual,
         predicted,
+        actual_gripper,
+        predicted_gripper,
         positions,
         timestamps,
         current_observation_indices,

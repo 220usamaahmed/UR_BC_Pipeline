@@ -173,8 +173,6 @@ def preprocess_depth(depth: np.ndarray) -> np.ndarray:
     inbetween_depth_value_object=np.percentile(inbetween_region_object,10)
     depth[object_start_x:object_end_x,object_start_y:object_end_y]=inbetween_depth_value_object
 
-    print(inbetween_depth_value_first_drawer, inbetween_depth_value_second_drawer, inbetween_depth_value_object)
-
     return depth.astype(np.float32, copy=False)
 
 
@@ -197,8 +195,6 @@ class Inference(Node):
         self.declare_parameter('num_candidates', 10)
         self.declare_parameter('candidate_index', 0)
         self.declare_parameter('model_action_horizon', 20)
-        self.declare_parameter('model_output_scale', 2.0)
-        self.declare_parameter('joint_delta_divisor', 150.0)
         self.declare_parameter('gripper_threshold', 0.5)
 
         self.joint_names = list(self.get_parameter('joint_names').value)
@@ -226,10 +222,6 @@ class Inference(Node):
             self.get_parameter('candidate_index').value)
         self.model_action_horizon = int(
             self.get_parameter('model_action_horizon').value)
-        self.model_output_scale = float(
-            self.get_parameter('model_output_scale').value)
-        self.joint_delta_divisor = float(
-            self.get_parameter('joint_delta_divisor').value)
         self.gripper_threshold = float(
             self.get_parameter('gripper_threshold').value)
         self._validate_parameters()
@@ -250,7 +242,6 @@ class Inference(Node):
         self.create_subscription(
             JointState, '/joint_states', self._on_joint_state, 50)
         self.create_subscription(Image, DEPTH_TOPIC, self._on_depth, 10)
-        self.create_timer(self.dt, self._observation_tick)
         self._trajectory_client = ActionClient(
             self, FollowJointTrajectory, ACTION_NAME)
         self._gripper_client = self.create_client(
@@ -261,6 +252,10 @@ class Inference(Node):
             raise ValueError('joint_names must not be empty')
         if self.observation_length <= 0 or self.action_chunk_length <= 0:
             raise ValueError('observation and action lengths must be positive')
+        if self.observation_length > self.action_chunk_length:
+            raise ValueError(
+                'observation_length must not exceed action_chunk_length'
+            )
         if self.rate_hz <= 0.0:
             raise ValueError('rate_hz must be positive')
         if self.sync_tolerance < 0.0 or self.grip_release_delay < 0.0:
@@ -286,8 +281,6 @@ class Inference(Node):
             raise ValueError(
                 'model_action_horizon must be at least action_chunk_length'
             )
-        if self.joint_delta_divisor == 0.0:
-            raise ValueError('joint_delta_divisor must not be zero')
 
     def _resolve_device(self, requested: str) -> torch.device:
         if requested == 'auto':
@@ -356,15 +349,44 @@ class Inference(Node):
             return None
         return positions.copy(), depth.copy(), float(self._gripper_state)
 
-    def _observation_tick(self):
-        # After bootstrap, history changes only while a goal is active.
-        if (not self._trajectory_active or
-                (self._trajectory_result_future is not None and
-                 self._trajectory_result_future.done())):
+    def _checkpoint_observation(
+        self, checkpoint_time: float, gripper_state: int
+    ):
+        """Return the synchronized sample nearest one action checkpoint."""
+        if not self._joint_buffer or not self._depth_buffer:
             return
-        pair = self._latest_synchronized_pair()
-        if pair is not None:
-            self._observations.append(pair)
+
+        # Wait until both streams have reached the checkpoint. This prevents
+        # choosing the last sample before it when a closer sample is still in
+        # flight.
+        if (self._joint_buffer[-1][0] < checkpoint_time or
+                self._depth_buffer[-1][0] < checkpoint_time):
+            return None
+
+        best_pair = None
+        best_distance = float('inf')
+        for joint_time, positions in self._joint_buffer:
+            joint_distance = abs(joint_time - checkpoint_time)
+            depth_time, depth = min(
+                self._depth_buffer,
+                key=lambda item: abs(item[0] - joint_time),
+            )
+            depth_distance = abs(depth_time - checkpoint_time)
+            # sync_tolerance governs whether the joint and depth messages
+            # describe the same physical instant. It must not also constrain
+            # either stream to an action checkpoint: a camera running slower
+            # than the action rate may have no frame inside that window.
+            if abs(depth_time - joint_time) > self.sync_tolerance:
+                continue
+            distance = joint_distance + depth_distance
+            if distance < best_distance:
+                best_distance = distance
+                best_pair = (
+                    positions.copy(),
+                    depth.copy(),
+                    float(gripper_state),
+                )
+        return best_pair
 
     def _bootstrap_observations(self) -> bool:
         self.get_logger().info(
@@ -403,6 +425,17 @@ class Inference(Node):
         implementation, then convert the selected candidate into ten joint
         deltas and ten binary gripper states.
         """
+        self.get_logger().info(
+            'Model input columns: ' +
+            ', '.join([*self.joint_names, 'gripper']) +
+            '\nModel joint/gripper input:\n' +
+            np.array2string(
+                joint_history,
+                precision=2,
+                suppress_small=False,
+                separator=', ',
+            )
+        )
         depth = torch.from_numpy(depth_history).unsqueeze(0).unsqueeze(2)
         observations = torch.from_numpy(joint_history).unsqueeze(0)
         depth = depth.to(device=self.device, dtype=torch.float32)
@@ -455,13 +488,29 @@ class Inference(Node):
 
         selected = actions[
             self.candidate_index, :self.action_chunk_length
-        ].cpu().numpy()
-        selected *= self.model_output_scale
+        ].cpu().numpy() / 20.0
+        # Training multiplied all action targets by 20. Undo that
+        # normalization above; the first six values are then joint deltas in
+        # radians and the seventh is the gripper state.
         joint_deltas = selected[:, :len(self.joint_names)]
-        joint_deltas /= self.joint_delta_divisor
         gripper_states = (
             selected[:, 6] > self.gripper_threshold
         ).astype(np.uint8)
+        model_output = np.column_stack((joint_deltas, gripper_states))
+        self.get_logger().info(
+            'Model output columns: ' +
+            ', '.join([
+                *(f'{name}_delta' for name in self.joint_names),
+                'gripper',
+            ]) +
+            '\nModel joint-delta/gripper output:\n' +
+            np.array2string(
+                model_output,
+                precision=6,
+                suppress_small=False,
+                separator=', ',
+            )
+        )
         return joint_deltas, gripper_states
 
     def _validate_model_output(self, output):
@@ -563,7 +612,12 @@ class Inference(Node):
             result_future = handle.get_result_async()
             self._trajectory_result_future = result_future
             start_time = self.get_clock().now()
+            start_seconds = start_time.nanoseconds * 1e-9
             gripper_index = 0
+            observation_index = (
+                self.action_chunk_length - self.observation_length
+            )
+            checkpoint_observations = []
             while rclpy.ok() and not result_future.done():
                 rclpy.spin_once(self, timeout_sec=0.01)
                 elapsed = (
@@ -575,6 +629,23 @@ class Inference(Node):
                         handle.cancel_goal_async()
                         return False
                     gripper_index += 1
+                while (observation_index < self.action_chunk_length and
+                       elapsed >= (observation_index + 1) * self.dt):
+                    checkpoint_time = (
+                        start_seconds + (observation_index + 1) * self.dt
+                    )
+                    pair = self._checkpoint_observation(
+                        checkpoint_time,
+                        int(gripper_states[observation_index]),
+                    )
+                    if pair is None:
+                        break
+                    checkpoint_observations.append(pair)
+                    self.get_logger().debug(
+                        'Captured observation at action checkpoint '
+                        f'{observation_index + 1}.'
+                    )
+                    observation_index += 1
 
             wrapper = result_future.result()
             if wrapper is None:
@@ -591,6 +662,45 @@ class Inference(Node):
                         int(gripper_states[gripper_index])):
                     return False
                 gripper_index += 1
+
+            # The trajectory result can arrive before the sensor messages
+            # stamped nearest its final checkpoint. Continue spinning briefly
+            # so those messages can be paired instead of substituting an
+            # unrelated latest sample.
+            observation_deadline = (
+                self.get_clock().now() +
+                rclpy.duration.Duration(
+                    seconds=max(0.25, 2 * self.sync_tolerance + 2 * self.dt)
+                )
+            )
+            while (rclpy.ok() and
+                   observation_index < self.action_chunk_length and
+                   self.get_clock().now() < observation_deadline):
+                rclpy.spin_once(self, timeout_sec=0.01)
+                checkpoint_time = (
+                    start_seconds + (observation_index + 1) * self.dt
+                )
+                pair = self._checkpoint_observation(
+                    checkpoint_time,
+                    int(gripper_states[observation_index]),
+                )
+                if pair is None:
+                    continue
+                checkpoint_observations.append(pair)
+                self.get_logger().debug(
+                    'Captured observation at action checkpoint '
+                    f'{observation_index + 1}.'
+                )
+                observation_index += 1
+
+            if len(checkpoint_observations) != self.observation_length:
+                self.get_logger().error(
+                    'Could not collect all action-checkpoint observations: '
+                    f'got {len(checkpoint_observations)}, expected '
+                    f'{self.observation_length}.'
+                )
+                return False
+            self._observations.extend(checkpoint_observations)
             return True
         finally:
             self._trajectory_active = False
