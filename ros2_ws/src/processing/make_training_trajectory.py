@@ -216,6 +216,12 @@ def nearest_indices(times: np.ndarray, abs_grid: np.ndarray) -> np.ndarray:
     return np.where(pick_left, left, right)
 
 
+def asof_indices(times: np.ndarray, abs_grid: np.ndarray) -> np.ndarray:
+    """For each grid time, the index of the most recent sample at or before it."""
+    indices = np.searchsorted(times, abs_grid, side='right') - 1
+    return np.clip(indices, 0, len(times) - 1)
+
+
 def downsample(times: np.ndarray, positions: np.ndarray, rate_hz: float):
     """Resample onto a uniform grid by picking the nearest sample to each tick."""
     order = np.argsort(times)          # ensure ascending time
@@ -364,10 +370,10 @@ def process_single(bag_path, render=False):
         step_times, step_labels = step_times[order], step_labels[order]
         print(f"Read {len(step_labels)} {step_topic['name']} messages.")
 
-        # Sync steps to the same grid: each grid tick gets the current step label.
-        step_idx = nearest_indices(step_times, abs_grid)
+        # Sync steps to the same grid by holding each label until the next step starts.
+        step_idx = asof_indices(step_times, abs_grid)
         down_steps = step_labels[step_idx]
-        offsets = np.abs(step_times[step_idx] - abs_grid)
+        offsets = abs_grid - step_times[step_idx]
         print(f"Synced steps to the joint grid: mean offset {offsets.mean():.3f} s, "
               f"max offset {offsets.max():.3f} s.")
         save_kwargs['steps'] = down_steps
