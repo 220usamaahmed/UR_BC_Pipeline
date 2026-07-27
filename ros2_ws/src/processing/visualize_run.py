@@ -220,22 +220,27 @@ def build_animation(data: dict, draw_every: int):
         colors = plt.cm.Set3(np.linspace(0, 1, max(len(unique_steps), 3)))
         step_color_map = {step: colors[i % len(colors)] for i, step in enumerate(unique_steps)}
 
-    # Draw gripping and step background rectangles
-    # Gripping goes first to determine the reserved space
-    gripping_rectangles = []
-    grip_ymin, grip_ymax = None, None
-    if is_gripping is not None:
-        gripping_rectangles, grip_ymin, grip_ymax = build_gripping_rectangles(ax_joints, timestamps, is_gripping)
-
-    step_rectangles = []
-    if steps is not None:
-        step_rectangles = build_step_rectangles(ax_joints, timestamps, steps, step_color_map, grip_ymin, grip_ymax)
-
     colors = plt.rcParams['axes.prop_cycle'].by_key()['color']
     for j, name in enumerate(joint_names):
         color = colors[j % len(colors)]
         ax_joints.plot(timestamps, positions[:, j], label=name, linewidth=1, color=color)
         ax_deltas.plot(delta_times, deltas[:, j], linewidth=1, color=color)
+
+    # Draw gripping and step background rectangles after plotting so they use the
+    # data-driven y-limits, then restore those limits so the overlays do not rescale the axes.
+    joints_ylim = ax_joints.get_ylim()
+    deltas_ylim = ax_deltas.get_ylim()
+
+    grip_ymin, grip_ymax = None, None
+    if is_gripping is not None:
+        _, grip_ymin, grip_ymax = build_gripping_rectangles(ax_joints, timestamps, is_gripping)
+
+    if steps is not None:
+        build_step_rectangles(ax_joints, timestamps, steps, step_color_map, grip_ymin, grip_ymax)
+        build_step_rectangles(ax_deltas, timestamps, steps, step_color_map)
+
+    ax_joints.set_ylim(joints_ylim)
+    ax_deltas.set_ylim(deltas_ylim)
 
     joint_cursor = ax_joints.axvline(timestamps[0], color='black', linewidth=1.5)
     delta_cursor = ax_deltas.axvline(delta_times[0], color='black', linewidth=1.5)
@@ -309,7 +314,7 @@ def main():
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('run', help='Run directory, or a training_trajectory.npz path.')
     parser.add_argument('--output', help='Output video path (default: <run>/visualization.mp4)')
-    parser.add_argument('--draw_every', type=int, default=20,
+    parser.add_argument('--draw_every', type=int, default=10,
                          help='Render every Nth sample, to speed up rendering (default 20).')
     parser.add_argument('--batch', action='store_true',
                         help='Treat run as a parent path; scan subdirs and visualize all runs '
@@ -331,7 +336,8 @@ def process_single(run_path, draw_every, output_path=None):
     run_dir = os.path.dirname(npz_path)
     data = np.load(npz_path)
     rate_hz = float(data['rate_hz'])
-    fps = rate_hz / draw_every
+    # fps = rate_hz / draw_every
+    fps = 1
 
     n_samples = data['positions'].shape[0]
     n_rendered = len(range(0, n_samples, draw_every))
