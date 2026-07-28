@@ -23,6 +23,8 @@ setup(
         'console_scripts': [
             'imitation_moveit_control = '
             'legacy_bc_pipeline.imitation_moveit_control:main',
+            'trajectory_replay_control = '
+            'legacy_bc_pipeline.trajectory_replay_control:main',
         ],
     },
 )

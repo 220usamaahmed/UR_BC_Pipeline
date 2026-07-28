@@ -10,9 +10,11 @@ RUN apt-get update && apt-get install -y \
     ros-humble-foxglove-bridge \
     ros-humble-joint-state-publisher \
     ros-humble-moveit \
+    git \
     python3-colcon-common-extensions \
     python3-pip \
     python3-pylsp \
+    python3-rosdep \
     && rm -rf /var/lib/apt/lists/*
 
 # Behaviour-cloning inference dependencies. The PyTorch wheel matches the
@@ -51,6 +53,7 @@ RUN cp /tmp/cuda-ubuntu2204.pin /etc/apt/preferences.d/cuda-repository-pin-600 &
     cp /var/cuda-repo-ubuntu2204-12-8-local/cuda-*-keyring.gpg /usr/share/keyrings/ && \
     apt-get update && \
     apt-get -y install cuda-toolkit-12-8 libnvidia-encode-570 libnvidia-decode-570 && \
+    rm -f /etc/apt/sources.list.d/cuda-ubuntu2204-12-8-local.list && \
     rm -rf /var/lib/apt/lists/* /tmp/cuda-repo.deb /var/cuda-repo-ubuntu2204-12-8-local
 
 ENV CUDA_HOME=/usr/local/cuda-12.8
