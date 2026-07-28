@@ -18,3 +18,5 @@ ros2_ws/downloads
 .env
 
 .venv
+
+**/checkpoint_evaluation.*
