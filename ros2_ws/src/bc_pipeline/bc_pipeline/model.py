@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Tuple
 import numpy as np
 import torch
 import torch.nn as nn
@@ -85,6 +86,85 @@ class SinusoidalPositionalEncoding(nn.Module):
         # adding it does not force AMP activations back to float32.
         positional = self.pe[:, : x.size(1)].to(dtype=x.dtype)
         return x + positional
+
+
+@dataclass(frozen=True)
+class CriticConfig:
+    """Architecture settings used by the trajectory critic checkpoint."""
+
+    d_vis: int = 512
+    d_nonvis: int = 7
+    d_act: int = 7
+    d_model: int = 256
+    n_heads: int = 8
+    n_layers: int = 2
+    dropout: float = 0.1
+    hist_len: int = 5
+    horizon: int = 20
+
+
+class QTransformer(nn.Module):
+    """Score an action trajectory conditioned on observation history."""
+
+    def __init__(
+        self,
+        d_vis: int,
+        d_nonvis: int,
+        d_act: int,
+        d_model: int,
+        n_heads: int,
+        n_layers: int,
+        dropout: float,
+        hist_len: int = 5,
+        horizon: int = 20,
+    ) -> None:
+        super().__init__()
+        self.hist_len = hist_len
+        self.horizon = horizon
+        self.num_tokens = (2 * hist_len) + horizon
+
+        self.depth_proj = nn.Linear(d_vis, d_model)
+        self.nonvis_proj = nn.Linear(d_nonvis, d_model)
+        self.act_proj = nn.Linear(d_act, d_model)
+        self.pos_emb = SinusoidalPositionalEncoding(
+            d_model, max_len=self.num_tokens
+        )
+
+        encoder_layer = nn.TransformerEncoderLayer(
+            d_model=d_model,
+            nhead=n_heads,
+            dim_feedforward=4 * d_model,
+            dropout=dropout,
+            activation="gelu",
+            batch_first=True,
+        )
+        self.encoder = nn.TransformerEncoder(
+            encoder_layer, num_layers=n_layers
+        )
+        self.dropout = nn.Dropout(dropout)
+        self.q_head = nn.Sequential(
+            nn.Linear(d_model, d_model // 4),
+            nn.GELU(),
+            nn.Linear(d_model // 4, 1),
+        )
+
+    def forward(
+        self,
+        depth_hist: torch.Tensor,
+        nonvis_hist: torch.Tensor,
+        act_seq: torch.Tensor,
+    ) -> torch.Tensor:
+        batch_size = depth_hist.shape[0]
+        depth_tokens = self.depth_proj(depth_hist)
+        nonvis_tokens = self.nonvis_proj(nonvis_hist)
+        state_tokens = torch.stack(
+            (depth_tokens, nonvis_tokens), dim=2
+        ).view(batch_size, 2 * self.hist_len, -1)
+        action_tokens = self.act_proj(act_seq)
+
+        tokens = torch.cat((state_tokens, action_tokens), dim=1)
+        encoded = self.encoder(self.pos_emb(tokens))
+        return self.q_head(encoded.mean(dim=1)).squeeze(-1)
 
 
 class SinusoidalPosEmb(nn.Module):

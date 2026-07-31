@@ -1,4 +1,5 @@
 import math
+from random import random
 import threading
 import time
 from collections import deque
@@ -9,6 +10,7 @@ from typing import Deque, Dict, List, Optional, Sequence
 import numpy as np
 import rclpy
 import torch
+from bc_pipeline.model import CriticConfig, QTransformer
 from ecpmi_gripper.srv import GripperControl
 from pymoveit2 import MoveIt2
 from rclpy.node import Node
@@ -21,8 +23,9 @@ np.set_printoptions(suppress=True)
 torch.set_printoptions(precision=4, sci_mode=False)
 
 
-np.random.seed(1231)
-torch.manual_seed(1231)
+s = 102
+np.random.seed(s)
+torch.manual_seed(s)
     
 @dataclass
 class LatestMsg:
@@ -61,6 +64,8 @@ class ImitationMoveitControl(Node):
             "/data/external/marvin_weights/"
             "flow_matching_all_skills_epoch_5000.pt",
         )
+        self.declare_parameter("critic_checkpoint_path", "")
+        self.declare_parameter("num_predicted_actions", 20)
         
         self._joint_states_topic = str(self.get_parameter("joint_states_topic").value)
         self._depth_topic = str(self.get_parameter("depth_topic").value)
@@ -78,6 +83,24 @@ class ImitationMoveitControl(Node):
         )
         self._gripper_service = str(self.get_parameter("gripper_service").value)
         self._checkpoint_path = str(self.get_parameter("checkpoint_path").value)
+        self._critic_checkpoint_path = str(
+            self.get_parameter("critic_checkpoint_path").value
+        )
+        self._num_predicted_actions = int(
+            self.get_parameter("num_predicted_actions").value
+        )
+        if not self._critic_checkpoint_path:
+            raise ValueError(
+                "critic_checkpoint_path is required; pass '--ros-args -p "
+                "critic_checkpoint_path:=/path/to/critic.pt'"
+            )
+        if self._num_predicted_actions < 1:
+            raise ValueError("num_predicted_actions must be at least 1")
+        self._critic_config = CriticConfig()
+        if self._obs_window != self._critic_config.hist_len:
+            raise ValueError(
+                f"obs_window must be {self._critic_config.hist_len} for the critic"
+            )
         
         self.joint_observations = deque(maxlen=1000)
         self.depth_observations = deque(maxlen=30)
@@ -151,6 +174,33 @@ class ImitationMoveitControl(Node):
         self.flow_matching_policy.eval()
         for p in self.flow_matching_policy.parameters():
             p.requires_grad_(False)
+
+        self.critic_model = QTransformer(
+            d_vis=self._critic_config.d_vis,
+            d_nonvis=self._critic_config.d_nonvis,
+            d_act=self._critic_config.d_act,
+            d_model=self._critic_config.d_model,
+            n_heads=self._critic_config.n_heads,
+            n_layers=self._critic_config.n_layers,
+            dropout=self._critic_config.dropout,
+            hist_len=self._critic_config.hist_len,
+            horizon=self._critic_config.horizon,
+        )
+        critic_checkpoint = torch.load(
+            self._critic_checkpoint_path,
+            map_location=self.device,
+        )
+        critic_state = (
+            critic_checkpoint["q_state_dict"]
+            if isinstance(critic_checkpoint, dict)
+            and "q_state_dict" in critic_checkpoint
+            else critic_checkpoint
+        )
+        self.critic_model.load_state_dict(critic_state)
+        self.critic_model.to(self.device)
+        self.critic_model.eval()
+        for parameter in self.critic_model.parameters():
+            parameter.requires_grad_(False)
         
         
     def _stamp_to_sec(self, stamp) -> float:
@@ -531,7 +581,7 @@ class ImitationMoveitControl(Node):
             depth_images[i][object_start_x:object_end_x,object_start_y:object_end_y]=inbetween_depth_value_object
             print("inbetween_depth_value_object frame {}== {}" .format(i, inbetween_depth_value_object))
                             
-        num_predicted_actions = 1
+        num_predicted_actions = self._num_predicted_actions
         action_sequence_length = 20
         num_steps = 100
         action_dim = 7
@@ -550,25 +600,56 @@ class ImitationMoveitControl(Node):
         
         for k in range(num_steps):
             t_k = k * dt
-            t_k_tensor = torch.tensor(t_k, device=device, dtype=torch.float32).unsqueeze(0)
+            t_k_tensor = torch.full(
+                (num_predicted_actions,),
+                t_k,
+                device=device,
+                dtype=torch.float32,
+            )
             
             v_k = self.flow_matching_policy(depth_images, non_visual_obs, x, t_k_tensor) 
                         
             x_pred = x + dt * v_k   # Add some noise to the predicted action for better exploration
             
             t_k1 = (k + 1) * dt
-            t_k1_tensor = torch.tensor(t_k1, device=device, dtype=torch.float32).unsqueeze(0)
+            t_k1_tensor = torch.full(
+                (num_predicted_actions,),
+                t_k1,
+                device=device,
+                dtype=torch.float32,
+            )
             
             v_k1 = self.flow_matching_policy(depth_images, non_visual_obs, x_pred, t_k1_tensor)
             
             x = x + 0.5 * dt * (v_k + v_k1)
-        idx = 0
-        
-        actions = x[idx].cpu().numpy()[:, :7]
+        depth_features = self.flow_matching_policy.depth_encoder(
+            depth_images.reshape(
+                num_predicted_actions * self._obs_window,
+                *depth_images.shape[-3:],
+            )
+        ).reshape(num_predicted_actions, self._obs_window, -1)
+        q_values = self.critic_model(depth_features, non_visual_obs, x)
+        # selected_idx = int(torch.argmax(q_values).item())
 
-        # executed_actions = actions[:10, :] * 2.0
+        self.get_logger().info("All actions:")
+        for i in range(num_predicted_actions):
+            self.get_logger().info(
+                f"Action {i}: {np.array2string(x[i].cpu().numpy()[:, :7], formatter={'float_kind': lambda f: f'{f:.5f}'}, separator=', ')}; Q value: {q_values[i].item():.5f}"
+            )
+
+        selected_idx = int(input(f"Select an action index (0-{num_predicted_actions - 1}): "))
+        # selected_idx = np.random.randint(0, num_predicted_actions)
+
+        self.get_logger().info(
+            f"Critic Q values: {np.array2string(q_values.cpu().numpy(), formatter={'float_kind': lambda f: f'{f:.5f}'}, separator=', ')}; selected trajectory "
+            f"{selected_idx}"
+        )
+
+        actions = x[selected_idx].cpu().numpy()[:, :7]
         executed_actions = actions[:10, :]
-        print("chosen action  : ", executed_actions/2.0) 
+        self.get_logger().info("chosen action  : {}".format(executed_actions))
+
+        # input("Press Enter to continue...")
         
         return executed_actions.tolist()
 
