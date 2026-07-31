@@ -58,9 +58,8 @@ class ImitationMoveitControl(Node):
         self.declare_parameter("gripper_service", "/gripper_control")
         self.declare_parameter(
             "checkpoint_path",
-            "/home/shokry/ur3e-trajectories/weights_june_2/"
-            "flow_matching_manually_processed_depth_images_with_percentile_"
-            "masks_corrected_box_pos_all_skills_marvin_ep_3950.pt",
+            "/data/external/marvin_weights/"
+            "flow_matching_all_skills_epoch_5000.pt",
         )
         
         self._joint_states_topic = str(self.get_parameter("joint_states_topic").value)
@@ -190,7 +189,6 @@ class ImitationMoveitControl(Node):
             self._name_to_index = {name: i for i, name in enumerate(msg.name)}
         self._latest_joint_state = LatestMsg(self._stamp_to_sec(msg.header.stamp), msg)
         self.joint_observations.append((self._latest_joint_state.stamp_sec, self._extract_joint_vector(msg)))
-       # print("---- Latest joint observation: ", self.joint_observations[-1])
 
     def _on_depth(self, msg: Image) -> None:
         self._latest_depth = LatestMsg(self._stamp_to_sec(msg.header.stamp), msg)
@@ -211,10 +209,7 @@ class ImitationMoveitControl(Node):
         )
         return response
 
-    def _control_step(self):
-        
-        # print("---- Latest joint observation: ", self.joint_observations[-1] if self.joint_observations else "None")
-        
+    def _control_step(self):        
         if len(self.joint_observations) == 0 or len(self.depth_observations) == 0:
             self.get_logger().debug("Waiting for initial observations...")
             return
@@ -244,18 +239,11 @@ class ImitationMoveitControl(Node):
         
         duration = end_time - start_time
         time_delta = duration / 10
-    #    print("time delta: ", time_delta)
-        
-        
-        
         
         start_joint_pos= min(self.joint_observations, key=lambda obs: abs(obs[0] - start_time))[1]
         end_joint_pos= min(self.joint_observations, key=lambda obs: abs(obs[0] - end_time))[1]
-     #   print("start joint pos: ", start_joint_pos)
-      #  print("end joint pos: ", end_joint_pos)
         t = np.linspace(0, 1, 10)[:, None]   # shape (10, 1)
         out = (1 - t) * start_joint_pos + t * end_joint_pos
-     #   print("interpolated joint positions: ", out)
 
         obs_counter=5
         self._obs_queue.clear()
@@ -263,25 +251,16 @@ class ImitationMoveitControl(Node):
             closest_joint_obs = min(self.joint_observations, key=lambda obs: abs(obs[0] - t))
             closest_depth_obs = min(self.depth_observations, key=lambda obs: abs(obs[0] - t))
             
-       #     print(f"{t}, {closest_joint_obs[0]}, {closest_depth_obs[0]}")
-        #    print("joint == ", closest_joint_obs[1])
-            
-            # if abs(closest_joint_obs[0] - t) > time_delta or abs(closest_depth_obs[0] - t) > time_delta:
-            #     self.get_logger().warn(f"No close observation found for time {t:.2f}. Skipping this timestamp.")
-            #     continue
-            
-         #   joints = closest_joint_obs[1]
             if obs_counter >= 9:
                 obs_counter=9
             joints = out[obs_counter]
             obs_counter += 1
-          #  print("Closest joint observation: ", joints)
+
             joints = np.append(joints, self._obs_gripper_state)
             
             depth = closest_depth_obs[1]
-           # depth = depth[:190, 100:590]
            
-            depth = depth[ 60: 170  ,  230 : 440 ] 
+            depth = depth[60:170, 230:440] 
             
             depth = np.nan_to_num(depth, nan=10.0)
             depth = np.clip(depth, 0, 0.8)
@@ -289,15 +268,6 @@ class ImitationMoveitControl(Node):
                         
             self._obs_queue.append(Observation(joints, depth))
             
-           
-            
-        #t = torch.linspace(0, 1, steps=10).unsqueeze(1)   # shape [10, 1]
-        #out = (1 - t) * self.motion_start_joint_state + t * self.motion_end_joint_state
-       # observations = out[-self._obs_window:]
-       # print("start joint state: ", self.motion_start_joint_state)
-       # print("end joint state: ", self.motion_end_joint_state)
-       # print("interpolated joint states: ", out[-self._obs_window:])
-
         observations = list(self._obs_queue)[-self._obs_window:]
         self._inference_future = self._executor.submit(self._run_model, observations)
         
@@ -322,8 +292,8 @@ class ImitationMoveitControl(Node):
         
         actions = np.array(actions)
         actions = actions[:10, :]
-       # joint_actions = actions[:, :6] * np.pi / 180.0
-        joint_actions = actions[:, :6] /150.0
+        # joint_actions = actions[:, :6] / 150.0
+        joint_actions = actions[:, :6] / 100.0
         gripper_actions = actions[:, 6]
         
         self._next_gripper_state = (gripper_actions[5:] > 0.5).any()
@@ -335,29 +305,17 @@ class ImitationMoveitControl(Node):
         
         print(f"Model inference completed. Actions shape: {actions.shape}")
         
-        # Integrate actions over time to get the actual joint positions to execute
-        # joint_deltas = joint_actions / self._control_rate_hz
         joint_deltas = joint_actions
-    #    print("joint actions in execution == ", joint_actions)
-        # self._next_checkpoint = np.sum(joint_deltas, axis=0) + self._obs_queue[-1].joints[:6]
         self._next_checkpoint = np.sum(joint_deltas, axis=0) + self.joint_observations[-1][1][:6]
-        
-      #  print(f"Actions: {np.sum(joint_deltas, axis=0)*180.0/np.pi}")
-      #  print(f"Current joint state: {self._obs_queue[-1].joints[:6]}")
-     #   print(f"Current joint state: {self.joint_observations[-1][1][:6]*180.0/np.pi}")
-     #   print(f"Next checkpoint: {self._next_checkpoint*180.0/np.pi}")
         
     def _execute_gripper_action_if_ready(self):
         if self._next_gripper_state is None:
-            # print("No gripper action ready for execution.")
             return
         
         if self._gripper_sequence_active:
-            # print("Gripper sequence already active, waiting for it to complete before executing next gripper action.")
             return
         
         if self._next_gripper_state == self._prev_gripper_state:
-            # print("Gripper state has not changed since last execution, skipping gripper command.")
             return
         
         self._prev_gripper_state = self._next_gripper_state
@@ -369,8 +327,6 @@ class ImitationMoveitControl(Node):
             self._obs_gripper_state = 0.0
             
     def _start_grip_sequence(self) -> None:
-        # print("Starting gripper sequence: GRIP")
-        
         self._gripper_sequence_active = True
         
         self._obs_gripper_state = 1.0
@@ -392,9 +348,6 @@ class ImitationMoveitControl(Node):
         self._gripper_sequence_active = False
         
     def _send_gripper_command(self, command: str) -> bool:
-        
-        # print(f"Sending gripper command: {command}")
-        
         if not self._gripper_client.wait_for_service(timeout_sec=0.1):
             self.get_logger().warn(
                 f"Waiting for gripper service at {self._gripper_service}"
@@ -412,7 +365,6 @@ class ImitationMoveitControl(Node):
             return
             
         if self._next_checkpoint is None:
-            # print("No checkpoint ready for execution.")
             return
         
         print(f"Executing actions")
@@ -427,37 +379,23 @@ class ImitationMoveitControl(Node):
             self.get_logger().info("Moving to next checkpoint...")
             self.motion_start_time = time.time()
             print("start time before motion: ", self.motion_start_time)
-            print("joints before motion: ", self.joint_observations[-1][1][:6]*180.0/np.pi)
-            print("checkpoint: ", checkpoint*180.0/np.pi)
+            print("joints before motion: ", self.joint_observations[-1][1][:6] * 180.0 / np.pi)
+            print("checkpoint: ", checkpoint * 180.0 / np.pi)
             self.moveit2.move_to_configuration(checkpoint, self._joint_names, tolerance=0.001)
             self.get_logger().info("Waiting for movement to complete...")
             
             if not self.moveit2.wait_until_executed():
                 self.get_logger().error("Failed to execute movement to checkpoint.")
-            # time.sleep(2)
             self.motion_end_time = time.time()
             print("end time after motion: ", self.motion_end_time)
-            joints_after_motion = self.joint_observations[-1][1][:6]*180.0/np.pi
+            joints_after_motion = self.joint_observations[-1][1][:6] * 180.0 / np.pi
             print(f"Reached checkpoint after action. Current joint state: {joints_after_motion}")
-            print(f"Difference from checkpoint: {(joints_after_motion - checkpoint*180.0/np.pi)}")
+            print(f"Difference from checkpoint: {(joints_after_motion - checkpoint * 180.0 / np.pi)}")
             self.executing_actions = False
-            
-            # Dummy motion
-            # self.motion_start_time = time.time()
-            # time.sleep(2.0)
-            # self.motion_end_time = time.time()
-            # self.executing_actions = False
-            
+
             self.get_logger().info("Movement to checkpoint completed.")
 
         threading.Thread(target=move_to_checkpoint).start()
-    
- 
- 
- 
- 
- 
- 
 
     def quantize_depth_upper_numpy_batch(
         self,
@@ -517,71 +455,16 @@ class ImitationMoveitControl(Node):
         return depth_q
         
         
-        
- 
- 
- 
- 
-        
     @torch.no_grad()
     def _run_model(self, observations: Sequence[Observation]) -> List[List[float]]:                
         device = self.device
         
         depth_images = torch.stack([torch.from_numpy(obs.depth).unsqueeze(0) for obs in observations], dim=0)#.unsqueeze(0)  # Shape: (obs_window, 1, H, W)
         non_visual_obs = torch.stack([torch.from_numpy(obs.joints) for obs in observations], dim=0)  # Shape: (obs_window, num_joints)
-      #  non_visual_obs_1 = torch.tensor([-3.9,-98.5,-1.04,-87.38 , 3.6,87.77,0.0])*math.pi/180.0
-       # non_visual_obs = non_visual_obs_1.unsqueeze(0).repeat(5,1)
         
         print("Model input:")
         print(non_visual_obs)
 
-
-
-        '''
-        first_box_start_x=51
-        first_box_start_y=0
-        first_box_end_x=110
-        first_box_end_y=55
-       
-        second_box_start_x=55
-        second_box_start_y=150
-        second_box_end_x=110
-        second_box_end_y=230        
-        
-        object_start_x=33
-        object_start_y=98
-        object_end_x=60
-        object_end_y=125  
-        
-        depth_images=np.array(depth_images.detach().cpu()).astype(np.float32)
-        print("depth image shape: ", depth_images.shape)
-        depth_images=np.squeeze(depth_images, axis=1)
-        print("depth image shape after squeeze: ", depth_images.shape)
-        
-            
-        depth_images = self.quantize_depth_upper_numpy_batch(
-        depth_images,
-        step=0.05
-        )    
-        inbetween_region_first_box=depth_images[:,first_box_start_x+5:,:first_box_end_y-11]
-        inbetween_depth_value_first_box=np.mean(inbetween_region_first_box,axis=(1, 2),keepdims=True)
-        depth_images[:,first_box_start_x+5:,:first_box_end_y-11]=inbetween_depth_value_first_box
-        
-        inbetween_region_second_box=depth_images[:,second_box_start_x+10:,second_box_start_y+30:]
-        inbetween_depth_value_second_box=inbetween_depth_value_first_box#np.mean(inbetween_region_second_box)
-        depth_images[:,second_box_start_x+10:,second_box_start_y+30:]=inbetween_depth_value_second_box        
-                
-        depth_images[:,first_box_start_x-10:first_box_start_x+5 ,first_box_start_y:first_box_end_y+10] = inbetween_depth_value_first_box
-        depth_images[:,first_box_start_x+4:first_box_end_x ,first_box_end_y-10:first_box_end_y+10] = inbetween_depth_value_first_box
-        
-        depth_images[:,second_box_start_x-10:second_box_start_x+10 ,second_box_start_y-10:] = inbetween_depth_value_second_box
-        depth_images[:,second_box_start_x-10: ,second_box_start_y-10:second_box_start_y+30] = inbetween_depth_value_second_box
-    
-        
-        depth_value_box_region_first_image=np.min(depth_images[:,object_start_x:object_end_x , object_start_y: object_end_y],axis=(1, 2),keepdims=True)
-        depth_images[:,object_start_x:object_end_x , object_start_y: object_end_y]=depth_value_box_region_first_image
-        '''
-        
         first_box_start_x=41
         first_box_start_y=0
         first_box_end_x=110
@@ -597,8 +480,6 @@ class ImitationMoveitControl(Node):
         object_end_x=60
         object_end_y=125    
         
-        
-        
         first_drawer_start_x=0
         first_drawer_start_y=0
         first_drawer_end_x=41
@@ -610,11 +491,8 @@ class ImitationMoveitControl(Node):
         second_drawer_end_x=41
         second_drawer_end_y=210
         
-        
         depth_images=np.array(depth_images.detach().cpu()).astype(np.float32)
-     #   print("depth image shape: ", depth_images.shape)
         depth_images=np.squeeze(depth_images, axis=1)
-      #  print("depth image shape after squeeze: ", depth_images.shape)
         
         for i in range(depth_images.shape[0]):    
             depth_images[i] = self.quantize_depth_upper_numpy_batch(
@@ -623,7 +501,6 @@ class ImitationMoveitControl(Node):
             )  
                 
             inbetween_region_first_box=depth_images[i][first_box_start_x:first_box_end_x,first_box_start_y:first_box_end_y]
-            #  print("inbetween_region_first_box shape == " , inbetween_region_first_box.shape)
             
             inbetween_depth_value_first_box=np.percentile(inbetween_region_first_box,10)
             depth_images[i][first_box_start_x:first_box_end_x,first_box_start_y:first_box_end_y]=inbetween_depth_value_first_box
@@ -631,68 +508,39 @@ class ImitationMoveitControl(Node):
             
 
             inbetween_region_second_box=depth_images[i][second_box_start_x:second_box_end_x,second_box_start_y:second_box_end_y]
-            #   print("inbetween_region_second_box shape == " , inbetween_region_second_box.shape)
             
             inbetween_depth_value_second_box=np.percentile(inbetween_region_second_box,10)
             depth_images[i][second_box_start_x:second_box_end_x,second_box_start_y:second_box_end_y]=inbetween_depth_value_second_box
             print("inbetween_depth_value_second_box frame {}== {}" .format(i, inbetween_depth_value_second_box))
             
             inbetween_region_first_drawer=depth_images[i][first_drawer_start_x:first_drawer_end_x,first_drawer_start_y:first_drawer_end_y]
-            #  print("inbetween_region_first_drawer shape == " , inbetween_region_first_drawer.shape)
             
             inbetween_depth_value_first_drawer=np.percentile(inbetween_region_first_drawer,10)
             depth_images[i][first_drawer_start_x:first_drawer_end_x,first_drawer_start_y:first_drawer_end_y]=inbetween_depth_value_first_drawer
             print("inbetween_depth_value_first_drawer frame {}== {}" .format(i, inbetween_depth_value_first_drawer))
-            
-
 
             inbetween_region_second_drawer=depth_images[i][second_drawer_start_x:second_drawer_end_x,second_drawer_start_y:second_drawer_end_y]
-            # print("inbetween_region_second_drawer shape == " , inbetween_region_second_drawer.shape)
             
             inbetween_depth_value_second_drawer=np.percentile(inbetween_region_second_drawer,10)
             depth_images[i][second_drawer_start_x:second_drawer_end_x,second_drawer_start_y:second_drawer_end_y]=inbetween_depth_value_second_drawer
             print("inbetween_depth_value_second_drawer frame {}== {}" .format(i, inbetween_depth_value_second_drawer))
             
-
             inbetween_region_object=depth_images[i][object_start_x:object_end_x,object_start_y:object_end_y]
-            #print("inbetween_region_object shape == " , inbetween_region_object.shape)
             
             inbetween_depth_value_object=np.percentile(inbetween_region_object,10)
             depth_images[i][object_start_x:object_end_x,object_start_y:object_end_y]=inbetween_depth_value_object
             print("inbetween_depth_value_object frame {}== {}" .format(i, inbetween_depth_value_object))
                             
-
-
-        
         num_predicted_actions = 1
         action_sequence_length = 20
         num_steps = 100
         action_dim = 7
-            
-       # depth_images = depth_images.to(device=device, dtype=torch.float32)
-       
-       # depth_images_qunat = depth_images_qunat.to(device=device, dtype=torch.float32)
-       
-       
-        non_visual_obs = non_visual_obs.to(device=device, dtype=torch.float32)
-        #non_visual_obs [...,:6]*=0.0
         
-      #  depth_images = depth_images.repeat(num_predicted_actions, 1,1,1,1)
+        non_visual_obs = non_visual_obs.to(device=device, dtype=torch.float32)
+        
         depth_images = np.expand_dims(depth_images, axis=1)
         depth_images = torch.from_numpy(depth_images).to(device=device, dtype=torch.float32)
         depth_images = depth_images.repeat(num_predicted_actions, 1,1,1,1)
-        
-        # Save depth images for debugging
-        # for i in range(depth_images.shape[0]):
-        #     depth_image_np = depth_images[i, 0].cpu().numpy()
-        #     depth_image_uint16 = (depth_image_np*255).astype(np.uint8)  # Convert to millimeters and uint16
-        #     print("shape to save", depth_image_uint16.shape, np.min(depth_image_uint16), np.max(depth_image_uint16))
-        #     # image shape (1, 110, 210)
-        #     depth_image_uint16 = np.squeeze(depth_image_uint16, axis=0)  # Remove channel dimension
-        #     cv2.imwrite(f"debug_depth_image_{i}.png", depth_image_uint16)
-        #     break
-        
-      
       
         non_visual_obs = non_visual_obs.repeat(num_predicted_actions, 1,1)     
         
@@ -714,30 +562,13 @@ class ImitationMoveitControl(Node):
             v_k1 = self.flow_matching_policy(depth_images, non_visual_obs, x_pred, t_k1_tensor)
             
             x = x + 0.5 * dt * (v_k + v_k1)
-
-        
-        
-        #actions = x.squeeze(0).cpu().numpy()[:, :7]
-        # print("inferred actions == " )
-        # for i in range(num_predicted_actions):
-        #     print(f"Action sequence {i}:")
-        #     print(x[i])#/150.0)
-        #     print("------------------")
-        
-       # actions = x[].cpu().numpy()[:, :7]
-        # random_idx = random.randint(0, num_predicted_actions - 1)
-        # idx = int(input(f"Select action sequence to execute (0-{num_predicted_actions - 1}): ").strip() or random_idx)
         idx = 0
         
         actions = x[idx].cpu().numpy()[:, :7]
-        # print("Selected action sequence: ", actions / 150.0)
-      #  if self.flow_matching_policy.inference_step > 3:
-        executed_actions = actions[:10, :]*2.0
-        # joint_actions = executed_actions[:, :6] * np.pi / 180.0
-        # executed_actions[:, :6] = executed_actions[:, :6] / 150.0
+
+        # executed_actions = actions[:10, :] * 2.0
+        executed_actions = actions[:10, :]
         print("chosen action  : ", executed_actions/2.0) 
-        # input("Press Enter to execute the above action sequence...")
-        # print("")
         
         return executed_actions.tolist()
 
