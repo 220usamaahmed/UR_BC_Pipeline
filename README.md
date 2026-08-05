@@ -39,6 +39,24 @@ Press `Ctrl+C` in the terminal where you ran `./start-docker.sh`, then:
 docker compose down
 ```
 
+### ROS 2 domain isolation
+
+The complete stack (UR driver, MoveIt, gripper, ZED camera, and Foxglove
+bridge) uses ROS domain ID `1` by default. Interactive shells opened with
+`docker compose exec` inherit the same value, so commands such as
+`ros2 topic list` see this stack without additional setup.
+
+To intentionally use a different domain, set the same value for every ROS 2
+participant that must communicate:
+
+```bash
+ROS_DOMAIN_ID=42 ./start-docker.sh --real
+```
+
+ROS domain IDs separate DDS discovery traffic but are not authentication or
+encryption. Another process configured with the same domain ID can discover
+the topics.
+
 ### Manual Docker commands (alternative)
 
 If you prefer to run docker directly without the script:

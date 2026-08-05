@@ -15,6 +15,9 @@ services:
       # External drive (optional, mounted only if it exists)
       - ${EXTERNAL_DRIVE_PATH:+${EXTERNAL_DRIVE_PATH}:/data/external}
     environment:
+      # Keep every ROS 2 node in this stack on an isolated DDS domain. Override
+      # with ROS_DOMAIN_ID=<id> when intentionally connecting another system.
+      - ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-1}
       - ROBOT_IP=192.168.56.101
       - USE_FAKE_HARDWARE=true
     # Bring up the UR3e mock hardware and the Foxglove bridge automatically.

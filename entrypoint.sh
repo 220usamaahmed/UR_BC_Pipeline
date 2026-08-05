@@ -6,9 +6,13 @@
 # Env vars (set defaults for mock hardware; override for the real robot):
 #   ROBOT_IP           — IP of the real arm. Ignored when USE_FAKE_HARDWARE=true. (default: 192.168.56.101)
 #   USE_FAKE_HARDWARE  — "true" for mock hardware, "false" to connect to ROBOT_IP. (default: true)
+#   ROS_DOMAIN_ID      — DDS domain shared by all ROS 2 nodes in this stack. (default: 1)
 #   KINEMATICS_PARAMS_FILE — path to a calibration.yaml extracted from the real arm.
 #                            Only meaningful when USE_FAKE_HARDWARE=false; see README for how to generate it.
 set -e
+
+export ROS_DOMAIN_ID="${ROS_DOMAIN_ID:-1}"
+echo "ROS 2 domain ID: ${ROS_DOMAIN_ID}"
 
 source /opt/ros/humble/setup.bash
 

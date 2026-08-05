@@ -1,3 +1,6 @@
+import os
+from glob import glob
+
 from setuptools import find_packages, setup
 
 package_name = 'legacy_bc_pipeline'
@@ -12,6 +15,10 @@ setup(
             ['resource/' + package_name],
         ),
         ('share/' + package_name, ['package.xml']),
+        (
+            os.path.join('share', package_name, 'launch'),
+            glob('launch/*.launch.py'),
+        ),
     ],
     install_requires=['setuptools'],
     zip_safe=True,
@@ -25,6 +32,10 @@ setup(
             'legacy_bc_pipeline.imitation_moveit_control:main',
             'trajectory_replay_control = '
             'legacy_bc_pipeline.trajectory_replay_control:main',
+            'trajectory_control = '
+            'legacy_bc_pipeline.trajectory_control:main',
+            'dataset_recorder = '
+            'legacy_bc_pipeline.dataset_recorder:main',
         ],
     },
 )
