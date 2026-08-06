@@ -13,6 +13,10 @@ from std_msgs.msg import Int32, UInt8
 from std_srvs.srv import Trigger
 
 
+RED = "\033[31m"
+RESET = "\033[0m"
+
+
 @dataclass
 class LatestMsg:
     stamp_sec: float
@@ -80,10 +84,6 @@ class DatasetRecorder(Node):
 
         period = 1.0 / self._sample_rate_hz if self._sample_rate_hz > 0 else 0.0333
         self._timer = self.create_timer(period, self._sample)
-        self.get_logger().info(
-            "DatasetRecorder ready. Recording at {:.2f} Hz with sync tolerance of "
-            "{:.2f} sec.".format(self._sample_rate_hz, self._sync_tolerance_sec)
-        )
 
     def _now_sec(self) -> float:
         return self.get_clock().now().nanoseconds / 1e9
@@ -103,7 +103,6 @@ class DatasetRecorder(Node):
         self._latest_joint_cmd = LatestMsg(self._stamp_to_sec(msg.header.stamp), msg)
 
     def _on_gripper_state(self, msg: UInt8) -> None:
-        print("Gripper State", msg)
         self._latest_gripper_state = LatestMsg(self._now_sec(), msg)
 
     def _on_segment(self, msg: Int32) -> None:
@@ -179,8 +178,9 @@ class DatasetRecorder(Node):
             return
 
         now_sec = self._now_sec()
-        if not self._inputs_ready(now_sec):
-            print("Inputs not ready or not synchronized, skipping sample.")
+        skip_reason = self._input_skip_reason(now_sec)
+        if skip_reason is not None:
+            self._print_skipped_sample(skip_reason)
             return
 
         joint_state = self._latest_joint_state.msg
@@ -191,45 +191,46 @@ class DatasetRecorder(Node):
             joint_state, gripper_state, self._latest_segment_id
         )
         action = self._build_action(joint_cmd, gripper_state)
-        depth_array = self._image_to_array(depth)
-        if depth_array is None:
+        try:
+            depth_array = self._image_to_array(depth)
+        except ValueError as exc:
+            self._print_skipped_sample(f"{self._depth_topic}: {exc}")
             return
 
-        print(f"  Joint positions: {observation[:6]}")
         self._observations.append(observation)
         self._actions.append(action)
         self._timestamps.append(now_sec)
         self._depth_frames.append(depth_array)
 
-    def _inputs_ready(self, now_sec: float) -> bool:
-        if (
-            self._latest_joint_state is None
-            or self._latest_joint_cmd is None
-            or self._latest_gripper_state is None
-            or self._latest_depth is None
-            or self._name_to_index is None
-        ):
-            print("One or more inputs are not yet available.")
-            print(f"  Latest joint state: {self._latest_joint_state is not None}")
-            print(f"  Latest joint command: {self._latest_joint_cmd is not None}")
-            print(f"  Latest gripper state: {self._latest_gripper_state is not None}")
-            print(f"  Latest depth: {self._latest_depth is not None}")
-            print(f"  Latest segment id: {self._latest_segment_id is not None}")
-            print(f"  Name to index mapping: {self._name_to_index is not None}")
-            return False
+    def _input_skip_reason(self, now_sec: float) -> Optional[str]:
+        inputs = (
+            (self._joint_states_topic, self._latest_joint_state),
+            (self._joint_command_topic, self._latest_joint_cmd),
+            (self._gripper_state_topic, self._latest_gripper_state),
+            (self._depth_topic, self._latest_depth),
+        )
+        missing_topics = [topic for topic, latest in inputs if latest is None]
+        if self._name_to_index is None and self._joint_states_topic not in missing_topics:
+            missing_topics.append(f"{self._joint_states_topic} (joint-name mapping)")
+        if missing_topics:
+            return "missing input: " + ", ".join(missing_topics)
 
-        for latest in (
-            self._latest_joint_state,
-            self._latest_joint_cmd,
-            self._latest_depth,
+        stale_topics = []
+        for topic, latest in (
+            (self._joint_states_topic, self._latest_joint_state),
+            (self._joint_command_topic, self._latest_joint_cmd),
+            (self._depth_topic, self._latest_depth),
         ):
-            if abs(now_sec - latest.stamp_sec) > self._sync_tolerance_sec:
-                print(
-                    f"Latest {type(latest.msg).__name__} timestamp difference: "
-                    f"{abs(now_sec - latest.stamp_sec):.3f} sec"
-                )
-                return False
-        return True
+            age_sec = abs(now_sec - latest.stamp_sec)
+            if age_sec > self._sync_tolerance_sec:
+                stale_topics.append(f"{topic} ({age_sec:.3f} s old)")
+        if stale_topics:
+            return "stale input: " + ", ".join(stale_topics)
+        return None
+
+    @staticmethod
+    def _print_skipped_sample(reason: str) -> None:
+        print(f"{RED}Skipping sample: {reason}{RESET}")
 
     def _build_observation(
         self, joint_state: JointState, gripper_state: UInt8, _segment_id: int
@@ -271,19 +272,19 @@ class DatasetRecorder(Node):
             onehot[2] = 1.0
         return onehot
 
-    def _image_to_array(self, msg: Image) -> Optional[np.ndarray]:
+    def _image_to_array(self, msg: Image) -> np.ndarray:
         if msg.encoding == "32FC1":
             dtype = np.float32
         elif msg.encoding == "16UC1":
             dtype = np.uint16
         else:
-            self.get_logger().warn(f"Unsupported depth encoding: {msg.encoding}")
-            return None
+            raise ValueError(f"unsupported depth encoding {msg.encoding!r}")
 
         expected_len = msg.height * msg.width * np.dtype(dtype).itemsize
         if len(msg.data) < expected_len:
-            self.get_logger().warn("Depth image buffer is smaller than expected.")
-            return None
+            raise ValueError(
+                f"depth buffer has {len(msg.data)} bytes; expected at least {expected_len}"
+            )
         array = np.frombuffer(msg.data, dtype=dtype, count=msg.height * msg.width)
         return array.reshape((msg.height, msg.width))
 

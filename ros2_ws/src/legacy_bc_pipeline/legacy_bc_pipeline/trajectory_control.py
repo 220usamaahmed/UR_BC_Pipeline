@@ -286,6 +286,7 @@ class TrajectoryControl(Node):
             return
         if response.success:
             self.get_logger().info("Dataset recorder started.")
+            self._publish_gripper_state(self._gripper_state)
             if self._recorder_start_timer is not None:
                 self._recorder_start_timer.cancel()
         else:

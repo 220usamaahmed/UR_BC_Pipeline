@@ -141,6 +141,24 @@ def add_gripper_regions(ax, time: np.ndarray, active: np.ndarray) -> None:
         ax.axvspan(left, right, color=GRIPPER_COLOR, alpha=0.2, linewidth=0)
 
 
+def add_frame_axis(ax, time: np.ndarray) -> None:
+    """Add a secondary x-axis mapping elapsed time to one-based frame numbers."""
+    frame_numbers = np.arange(1, len(time) + 1, dtype=float)
+
+    def time_to_frame(values):
+        return np.interp(values, time, frame_numbers)
+
+    def frame_to_time(values):
+        return np.interp(values, frame_numbers, time)
+
+    frame_axis = ax.secondary_xaxis(
+        "top",
+        functions=(time_to_frame, frame_to_time),
+    )
+    frame_axis.set_xlabel("recorded frame")
+    frame_axis.xaxis.set_major_formatter("{x:.0f}")
+
+
 def plot_trajectory(npz_path: str, output_path: str) -> None:
     """Render and save the trajectory overview."""
     with np.load(npz_path) as data:
@@ -197,6 +215,7 @@ def plot_trajectory(npz_path: str, output_path: str) -> None:
     observation_ax.set_ylabel("angle (rad)")
     observation_ax.grid(alpha=0.25)
     observation_ax.tick_params(labelbottom=False)
+    add_frame_axis(observation_ax, time)
 
     action_ax.set_title("Joint actions")
     action_ax.set_xlabel("time from recording start (s)")
@@ -285,6 +304,7 @@ def animate_trajectory(
     observation_ax.set_ylabel("angle (rad)")
     observation_ax.grid(alpha=0.25)
     observation_ax.tick_params(labelbottom=False)
+    add_frame_axis(observation_ax, time)
     action_ax.set_title("Joint actions")
     action_ax.set_xlabel("time from recording start (s)")
     action_ax.set_ylabel("action")

@@ -23,7 +23,7 @@ np.set_printoptions(suppress=True)
 torch.set_printoptions(precision=4, sci_mode=False)
 
 
-s = 102
+s = 103
 np.random.seed(s)
 torch.manual_seed(s)
     
@@ -62,9 +62,13 @@ class ImitationMoveitControl(Node):
         self.declare_parameter(
             "checkpoint_path",
             "/data/external/marvin_weights/"
-            "flow_matching_all_skills_epoch_5000.pt",
+            "all_skills_with_more_incorrect_trajs_epoch_600.pt",
         )
-        self.declare_parameter("critic_checkpoint_path", "")
+        self.declare_parameter(
+            "critic_checkpoint_path", 
+            "/data/external/marvin_weights/"
+            "ckpt_without_normalization_wit_MC_uncertainty_discount_factor_9999_top_30_percent_all_skills_epoch_4500_original_propagation_left_drawer_ep_400.pt"
+        )
         self.declare_parameter("num_predicted_actions", 20)
         
         self._joint_states_topic = str(self.get_parameter("joint_states_topic").value)
@@ -582,6 +586,7 @@ class ImitationMoveitControl(Node):
             print("inbetween_depth_value_object frame {}== {}" .format(i, inbetween_depth_value_object))
                             
         num_predicted_actions = self._num_predicted_actions
+        num_predicted_actions = 10
         action_sequence_length = 20
         num_steps = 100
         action_dim = 7
@@ -639,6 +644,7 @@ class ImitationMoveitControl(Node):
 
         selected_idx = int(input(f"Select an action index (0-{num_predicted_actions - 1}): "))
         # selected_idx = np.random.randint(0, num_predicted_actions)
+        # selected_idx = 0
 
         self.get_logger().info(
             f"Critic Q values: {np.array2string(q_values.cpu().numpy(), formatter={'float_kind': lambda f: f'{f:.5f}'}, separator=', ')}; selected trajectory "
