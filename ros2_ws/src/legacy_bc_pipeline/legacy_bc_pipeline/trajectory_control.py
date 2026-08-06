@@ -20,6 +20,34 @@ from std_srvs.srv import Trigger
 JointWaypoint = List[float]
 
 
+class MockGripperClient:
+    """Asynchronous gripper client that succeeds after a short delay."""
+
+    def __init__(self, node: Node, delay_sec: float = 1.5) -> None:
+        self._node = node
+        self._delay_sec = delay_sec
+
+    def wait_for_service(self, timeout_sec: float) -> bool:
+        del timeout_sec
+        return True
+
+    def call_async(self, request: GripperControl.Request) -> rclpy.task.Future:
+        future = rclpy.task.Future()
+        timer = None
+
+        def finish_request() -> None:
+            response = GripperControl.Response()
+            response.success = True
+            response.message = f"Mocked gripper command: {request.command}"
+            future.set_result(response)
+            if timer is not None:
+                timer.cancel()
+                self._node.destroy_timer(timer)
+
+        timer = self._node.create_timer(self._delay_sec, finish_request)
+        return future
+
+
 @dataclass
 class Step:
     """One operation in the hard-coded trajectory."""
@@ -42,6 +70,7 @@ class TrajectoryControl(Node):
         self.declare_parameter("auto_start_servo", True)
         self.declare_parameter("start_servo_service", "/servo_node/start_servo")
         self.declare_parameter("gripper_service", "/gripper_control")
+        self.declare_parameter("mock_gripper", False)
         self.declare_parameter("gripper_state_topic", "/gripper_state")
         self.declare_parameter("recorder_start_service", "/dataset_recorder/start")
         self.declare_parameter("recorder_stop_service", "/dataset_recorder/stop")
@@ -58,6 +87,7 @@ class TrajectoryControl(Node):
         self._auto_start_servo = bool(self.get_parameter("auto_start_servo").value)
         self._start_servo_service = str(self.get_parameter("start_servo_service").value)
         self._gripper_service = str(self.get_parameter("gripper_service").value)
+        self._mock_gripper = bool(self.get_parameter("mock_gripper").value)
         self._gripper_state_topic = str(self.get_parameter("gripper_state_topic").value)
         self._recorder_start_service = str(
             self.get_parameter("recorder_start_service").value
@@ -112,7 +142,13 @@ class TrajectoryControl(Node):
             JointState, "/joint_states", self._joint_state_callback, 10
         )
         self._start_servo_client = self.create_client(Trigger, self._start_servo_service)
-        self._gripper_client = self.create_client(GripperControl, self._gripper_service)
+        if self._mock_gripper:
+            self._gripper_client = MockGripperClient(self)
+            self.get_logger().info("Mock gripper enabled (0.1 s response delay).")
+        else:
+            self._gripper_client = self.create_client(
+                GripperControl, self._gripper_service
+            )
 
         self._recorder_start_client = None
         self._recorder_stop_client = None
