@@ -62,12 +62,12 @@ class ImitationMoveitControl(Node):
         self.declare_parameter(
             "checkpoint_path",
             "/data/external/marvin_weights/"
-            "all_skills_with_more_incorrect_trajs_epoch_600.pt",
+            "flow_matching_manually_processed_depth_images_ddp_epoch_1000.pt",
         )
         self.declare_parameter(
             "critic_checkpoint_path", 
             "/data/external/marvin_weights/"
-            "ckpt_without_normalization_wit_MC_uncertainty_discount_factor_9999_top_30_percent_all_skills_epoch_4500_original_propagation_left_drawer_ep_400.pt"
+            "ckpt_without_normalization_wit_MC_uncertainty_discount_factor_999_top_30_percent_all_skills_with_incorrect_trajs_epoch_1000_modified_propagation_left_drawer_ep_700.pt"
         )
         self.declare_parameter("num_predicted_actions", 20)
         
@@ -586,7 +586,7 @@ class ImitationMoveitControl(Node):
             print("inbetween_depth_value_object frame {}== {}" .format(i, inbetween_depth_value_object))
                             
         num_predicted_actions = self._num_predicted_actions
-        num_predicted_actions = 10
+        # num_predicted_actions = 10
         action_sequence_length = 20
         num_steps = 100
         action_dim = 7
@@ -634,7 +634,6 @@ class ImitationMoveitControl(Node):
             )
         ).reshape(num_predicted_actions, self._obs_window, -1)
         q_values = self.critic_model(depth_features, non_visual_obs, x)
-        # selected_idx = int(torch.argmax(q_values).item())
 
         self.get_logger().info("All actions:")
         for i in range(num_predicted_actions):
@@ -642,7 +641,8 @@ class ImitationMoveitControl(Node):
                 f"Action {i}: {np.array2string(x[i].cpu().numpy()[:, :7], formatter={'float_kind': lambda f: f'{f:.5f}'}, separator=', ')}; Q value: {q_values[i].item():.5f}"
             )
 
-        selected_idx = int(input(f"Select an action index (0-{num_predicted_actions - 1}): "))
+        selected_idx = int(torch.argmax(q_values).item())
+        # selected_idx = int(input(f"Select an action index (0-{num_predicted_actions - 1}): "))
         # selected_idx = np.random.randint(0, num_predicted_actions)
         # selected_idx = 0
 
@@ -655,7 +655,7 @@ class ImitationMoveitControl(Node):
         executed_actions = actions[:10, :]
         self.get_logger().info("chosen action  : {}".format(executed_actions))
 
-        # input("Press Enter to continue...")
+        input("Press Enter to continue...")
         
         return executed_actions.tolist()
 

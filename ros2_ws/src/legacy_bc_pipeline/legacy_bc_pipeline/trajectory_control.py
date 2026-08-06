@@ -214,8 +214,11 @@ class TrajectoryControl(Node):
         # gripping_prepare = [-109.33, -64.95, -95.61, 90.01, 82.37, -62.37]
         # gripping = [-110.74, -83.66, -75.49, 90.03, 82.38, -62.40]
 
-        gripping_prepare = [-107.25, -77.34, -85.32, 90.01, 70.47, -75.42]
-        gripping = [-108.66, -85.41, -75.83, 90.02, 70.47, -75.44]
+        # gripping_prepare = [-107.25, -77.34, -85.32, 90.01, 70.47, -75.42]
+        # gripping = [-108.66, -85.41, -75.83, 90.02, 70.47, -75.44]
+
+        gripping = [-118.31, -48.24, -103.34, 90.05, 89.13, -72.07]
+        gripping_with_noise = np.array(gripping) + np.random.uniform(-8.0, 8.0, size=len(gripping))
 
         ### Open Right
 
@@ -226,8 +229,8 @@ class TrajectoryControl(Node):
             Step(kind="wait", wait_sec=1.0),
             
             Step(kind="reset_noise"),
-            Step(kind="waypoint", waypoint=to_rad(gripping_prepare)),
-            Step(kind="waypoint", waypoint=to_rad(gripping)),
+            # Step(kind="waypoint", waypoint=to_rad(gripping_prepare)),
+            Step(kind="waypoint", waypoint=to_rad(gripping_with_noise.tolist())),
             
             Step(kind="gripper", gripper_command="grip", wait_sec=0.3),
             Step(kind="gripper", gripper_command="release", wait_sec=0.1),

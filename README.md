@@ -300,3 +300,9 @@ The camera seems to be flipped left right
 ```bash
 ros2 run tf2_ros static_transform_publisher -0.05 1.0 0.5 1.571 0.0 0.0 base_link zed_left_camera_frame
 ```
+
+
+  ros2 launch ur_moveit_config ur_moveit.launch.py \
+    ur_type:=ur3e \
+    launch_servo:=true \
+    launch_rviz:=true
