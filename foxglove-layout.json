@@ -429,16 +429,98 @@
     "Plot!inferenceController": {
       "paths": [
         {
-          "value": "/scaled_joint_trajectory_controller/controller_state.actual.positions[:]",
-          "label": "controller actual",
+          "value": "/scaled_joint_trajectory_controller/controller_state.actual.positions[0]",
+          "label": "pan actual",
           "enabled": true,
+          "color": "#4e98e2",
           "timestampMethod": "headerStamp",
           "showLine": true
         },
         {
-          "value": "/scaled_joint_trajectory_controller/controller_state.desired.positions[:]",
-          "label": "controller desired",
+          "value": "/scaled_joint_trajectory_controller/controller_state.desired.positions[0]",
+          "label": "pan desired",
           "enabled": true,
+          "color": "#1d5f9f",
+          "timestampMethod": "headerStamp",
+          "showLine": true
+        },
+        {
+          "value": "/scaled_joint_trajectory_controller/controller_state.actual.positions[1]",
+          "label": "lift actual",
+          "enabled": true,
+          "color": "#a395e2",
+          "timestampMethod": "headerStamp",
+          "showLine": true
+        },
+        {
+          "value": "/scaled_joint_trajectory_controller/controller_state.desired.positions[1]",
+          "label": "lift desired",
+          "enabled": true,
+          "color": "#654ca8",
+          "timestampMethod": "headerStamp",
+          "showLine": true
+        },
+        {
+          "value": "/scaled_joint_trajectory_controller/controller_state.actual.positions[2]",
+          "label": "elbow actual",
+          "enabled": true,
+          "color": "#61cbff",
+          "timestampMethod": "headerStamp",
+          "showLine": true
+        },
+        {
+          "value": "/scaled_joint_trajectory_controller/controller_state.desired.positions[2]",
+          "label": "elbow desired",
+          "enabled": true,
+          "color": "#147ca1",
+          "timestampMethod": "headerStamp",
+          "showLine": true
+        },
+        {
+          "value": "/scaled_joint_trajectory_controller/controller_state.actual.positions[3]",
+          "label": "wrist 1 actual",
+          "enabled": true,
+          "color": "#5cd6a9",
+          "timestampMethod": "headerStamp",
+          "showLine": true
+        },
+        {
+          "value": "/scaled_joint_trajectory_controller/controller_state.desired.positions[3]",
+          "label": "wrist 1 desired",
+          "enabled": true,
+          "color": "#218965",
+          "timestampMethod": "headerStamp",
+          "showLine": true
+        },
+        {
+          "value": "/scaled_joint_trajectory_controller/controller_state.actual.positions[4]",
+          "label": "wrist 2 actual",
+          "enabled": true,
+          "color": "#f5774d",
+          "timestampMethod": "headerStamp",
+          "showLine": true
+        },
+        {
+          "value": "/scaled_joint_trajectory_controller/controller_state.desired.positions[4]",
+          "label": "wrist 2 desired",
+          "enabled": true,
+          "color": "#b83e1b",
+          "timestampMethod": "headerStamp",
+          "showLine": true
+        },
+        {
+          "value": "/scaled_joint_trajectory_controller/controller_state.actual.positions[5]",
+          "label": "wrist 3 actual",
+          "enabled": true,
+          "color": "#f7df71",
+          "timestampMethod": "headerStamp",
+          "showLine": true
+        },
+        {
+          "value": "/scaled_joint_trajectory_controller/controller_state.desired.positions[5]",
+          "label": "wrist 3 desired",
+          "enabled": true,
+          "color": "#aa8e00",
           "timestampMethod": "headerStamp",
           "showLine": true
         }

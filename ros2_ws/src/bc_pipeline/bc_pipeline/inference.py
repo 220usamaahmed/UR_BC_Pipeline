@@ -11,6 +11,7 @@ import rclpy.duration
 import torch
 from rclpy.action import ActionClient
 from rclpy.node import Node
+from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 
 from bc_pipeline.inference_debug import (
     EVENT_TOPIC,
@@ -289,8 +290,17 @@ class Inference(Node):
         self._selected_joint_publisher = None
         self._selected_depth_publisher = None
         if self.debug_enabled:
+            # run_start configures the separately launched canonicalizer. Keep
+            # trace events so a subscriber that is still being discovered when
+            # run_start is emitted can receive it instead of remaining
+            # permanently unconfigured.
+            event_qos = QoSProfile(
+                depth=100,
+                reliability=ReliabilityPolicy.RELIABLE,
+                durability=DurabilityPolicy.TRANSIENT_LOCAL,
+            )
             self._event_publisher = self.create_publisher(
-                String, EVENT_TOPIC, 100
+                String, EVENT_TOPIC, event_qos
             )
             self._phase_publisher = self.create_publisher(
                 String, PHASE_TOPIC, 20

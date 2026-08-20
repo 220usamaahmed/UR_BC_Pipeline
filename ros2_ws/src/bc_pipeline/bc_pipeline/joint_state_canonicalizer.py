@@ -5,7 +5,12 @@ import json
 
 import rclpy
 from rclpy.node import Node
-from rclpy.qos import qos_profile_sensor_data
+from rclpy.qos import (
+    DurabilityPolicy,
+    QoSProfile,
+    ReliabilityPolicy,
+    qos_profile_sensor_data,
+)
 from sensor_msgs.msg import JointState
 from std_msgs.msg import String
 
@@ -25,7 +30,14 @@ class JointStateCanonicalizer(Node):
         self.publisher = self.create_publisher(
             JointState, CANONICAL_JOINT_TOPIC, qos_profile_sensor_data
         )
-        self.create_subscription(String, EVENT_TOPIC, self._on_event, 20)
+        event_qos = QoSProfile(
+            depth=100,
+            reliability=ReliabilityPolicy.RELIABLE,
+            durability=DurabilityPolicy.TRANSIENT_LOCAL,
+        )
+        self.create_subscription(
+            String, EVENT_TOPIC, self._on_event, event_qos
+        )
         self.create_subscription(
             JointState,
             '/joint_states',
