@@ -49,14 +49,14 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# Check if external drive exists
-EXTERNAL_DRIVE="/media/siddiquieu1/AHMED/new-ur3e-trajectories"
-if [ -d "$EXTERNAL_DRIVE" ]; then
-    export EXTERNAL_DRIVE_PATH="$EXTERNAL_DRIVE"
-    echo "✓ External drive found at $EXTERNAL_DRIVE"
+# Mount shared storage when it is available
+STORAGE_PATH="/mnt/storage"
+if [ -d "$STORAGE_PATH" ]; then
+    export EXTERNAL_DRIVE_PATH="$STORAGE_PATH"
+    echo "✓ Storage found at $STORAGE_PATH"
 else
-    echo "⚠ External drive not found at $EXTERNAL_DRIVE"
-    echo "  Starting without the external drive mount"
+    echo "⚠ Storage not found at $STORAGE_PATH"
+    echo "  Starting without the storage mount"
 
     # An empty EXTERNAL_DRIVE_PATH produces an invalid empty volume entry in
     # Docker Compose. Use temporary copies with that optional mount removed.
