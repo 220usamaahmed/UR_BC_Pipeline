@@ -12,10 +12,28 @@ import torch
 from rclpy.action import ActionClient
 from rclpy.node import Node
 
+from bc_pipeline.inference_debug import (
+    EVENT_TOPIC,
+    MATCHED_TARGET_TOPIC,
+    ModelObservation,
+    PHASE_TOPIC,
+    PLANNED_TARGET_TOPIC,
+    PREPROCESS_VERSION,
+    SELECTED_DEPTH_TOPIC,
+    SELECTED_JOINT_TOPIC,
+    ExecutionCandidate,
+    depth_sha256,
+    dumps_event,
+    event_message,
+    integrate_joint_deltas,
+    interpolate_joint_positions,
+    selected_observation_id,
+)
 from bc_pipeline.model import ConditionalDiffusionModel
 from control_msgs.action import FollowJointTrajectory
 from ecpmi_gripper.srv import GripperControl
 from sensor_msgs.msg import Image, JointState
+from std_msgs.msg import String
 from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
 
 ACTION_NAME = '/scaled_joint_trajectory_controller/follow_joint_trajectory'
@@ -33,9 +51,9 @@ DEFAULT_HOME_POSITION = np.deg2rad(
 ).tolist()
 
 
-def stamp_seconds(msg) -> float:
-    """Return a ROS header stamp as floating-point seconds."""
-    return msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
+def stamp_nanoseconds(msg) -> int:
+    """Return a ROS header stamp without losing nanosecond precision."""
+    return msg.header.stamp.sec * 1_000_000_000 + msg.header.stamp.nanosec
 
 
 def decode_depth_image(msg: Image) -> np.ndarray:
@@ -197,6 +215,8 @@ class Inference(Node):
         self.declare_parameter('candidate_index', 0)
         self.declare_parameter('model_action_horizon', 20)
         self.declare_parameter('gripper_threshold', 0.5)
+        self.declare_parameter('debug_enabled', False)
+        self.declare_parameter('run_id', '')
 
         self.joint_names = list(self.get_parameter('joint_names').value)
         self.observation_length = int(
@@ -227,8 +247,15 @@ class Inference(Node):
             self.get_parameter('model_action_horizon').value)
         self.gripper_threshold = float(
             self.get_parameter('gripper_threshold').value)
+        self.debug_enabled = bool(
+            self.get_parameter('debug_enabled').value)
+        requested_run_id = str(self.get_parameter('run_id').value)
+        self.run_id = requested_run_id or (
+            f'inference-{self.get_clock().now().nanoseconds}'
+        )
         self._validate_parameters()
         self.dt = 1.0 / self.rate_hz
+        self.sync_tolerance_ns = int(round(self.sync_tolerance * 1e9))
         self.device = self._resolve_device(
             str(self.get_parameter('device').value))
         self.model = self._load_model()
@@ -239,12 +266,13 @@ class Inference(Node):
         self._observations = deque(maxlen=self.observation_length)
         self._trajectory_active = False
         self._trajectory_result_future = None
-        self._execution_start_seconds = None
-        self._execution_end_seconds = None
+        self._execution_start_ns = None
+        self._execution_end_ns = None
         self._execution_joint_samples = []
         self._execution_depth_samples = []
         self._gripper_state = 0
         self._depth_encoding_error = None
+        self._last_failure_reason = None
 
         self.create_subscription(
             JointState, '/joint_states', self._on_joint_state, 50)
@@ -253,6 +281,55 @@ class Inference(Node):
             self, FollowJointTrajectory, ACTION_NAME)
         self._gripper_client = self.create_client(
             GripperControl, GRIPPER_SERVICE)
+
+        self._event_publisher = None
+        self._phase_publisher = None
+        self._planned_target_publisher = None
+        self._matched_target_publisher = None
+        self._selected_joint_publisher = None
+        self._selected_depth_publisher = None
+        if self.debug_enabled:
+            self._event_publisher = self.create_publisher(
+                String, EVENT_TOPIC, 100
+            )
+            self._phase_publisher = self.create_publisher(
+                String, PHASE_TOPIC, 20
+            )
+            self._planned_target_publisher = self.create_publisher(
+                JointState, PLANNED_TARGET_TOPIC, 20
+            )
+            self._matched_target_publisher = self.create_publisher(
+                JointState, MATCHED_TARGET_TOPIC, 20
+            )
+            self._selected_joint_publisher = self.create_publisher(
+                JointState, SELECTED_JOINT_TOPIC, 20
+            )
+            self._selected_depth_publisher = self.create_publisher(
+                Image, SELECTED_DEPTH_TOPIC, 20
+            )
+            self._emit_phase('startup')
+            self._emit_event(
+                'run_start',
+                checkpoint_path=self.checkpoint_path,
+                joint_names=self.joint_names,
+                preprocessing_version=PREPROCESS_VERSION,
+                parameters={
+                    'observation_length': self.observation_length,
+                    'action_chunk_length': self.action_chunk_length,
+                    'rate_hz': self.rate_hz,
+                    'sync_tolerance_sec': self.sync_tolerance,
+                    'joint_match_tolerance_rad': self.joint_match_tolerance,
+                    'model_action_horizon': self.model_action_horizon,
+                    'candidate_index': self.candidate_index,
+                    'num_candidates': self.num_candidates,
+                    'flow_steps': self.flow_steps,
+                    'device': str(self.device),
+                    'home_position': self.home_position,
+                    'home_move_sec': self.home_move_sec,
+                    'gripper_threshold': self.gripper_threshold,
+                    'grip_release_delay_sec': self.grip_release_delay,
+                },
+            )
 
     def _validate_parameters(self):
         if not self.joint_names:
@@ -290,6 +367,62 @@ class Inference(Node):
             raise ValueError(
                 'model_action_horizon must be at least action_chunk_length'
             )
+
+    def _now_ns(self) -> int:
+        return int(self.get_clock().now().nanoseconds)
+
+    @staticmethod
+    def _set_header_stamp(msg, stamp_ns: int, frame_id: str = ''):
+        msg.header.stamp.sec = int(stamp_ns // 1_000_000_000)
+        msg.header.stamp.nanosec = int(stamp_ns % 1_000_000_000)
+        msg.header.frame_id = frame_id
+
+    def _emit_event(self, event_type: str, chunk_index=None, **payload):
+        if self._event_publisher is None or not rclpy.ok():
+            return
+        message = String()
+        message.data = dumps_event(event_message(
+            self.run_id,
+            event_type,
+            self._now_ns(),
+            chunk_index=chunk_index,
+            **payload,
+        ))
+        self._event_publisher.publish(message)
+
+    def _emit_phase(self, phase: str):
+        if self._phase_publisher is None or not rclpy.ok():
+            return
+        message = String()
+        message.data = phase
+        self._phase_publisher.publish(message)
+
+    def _publish_joint_debug(
+        self, publisher, stamp_ns: int, positions, frame_id: str = ''
+    ):
+        if publisher is None:
+            return
+        message = JointState()
+        self._set_header_stamp(message, stamp_ns, frame_id)
+        message.name = list(self.joint_names)
+        message.position = [float(value) for value in positions]
+        publisher.publish(message)
+
+    def _publish_depth_debug(
+        self, stamp_ns: int, depth: np.ndarray, frame_id: str
+    ):
+        if self._selected_depth_publisher is None:
+            return
+        pixels = np.ascontiguousarray(depth, dtype='<f4')
+        message = Image()
+        self._set_header_stamp(message, stamp_ns, frame_id)
+        message.height = pixels.shape[0]
+        message.width = pixels.shape[1]
+        message.encoding = '32FC1'
+        message.is_bigendian = False
+        message.step = pixels.shape[1] * pixels.dtype.itemsize
+        message.data = pixels.tobytes()
+        self._selected_depth_publisher.publish(message)
 
     def _resolve_device(self, requested: str) -> torch.device:
         if requested == 'auto':
@@ -334,11 +467,11 @@ class Inference(Node):
             return
         positions = np.asarray(
             [by_name[name] for name in self.joint_names], dtype=np.float32)
-        sample_time = stamp_seconds(msg)
-        self._joint_buffer.append((sample_time, positions))
-        if self._is_execution_timestamp(sample_time):
+        sample_time_ns = stamp_nanoseconds(msg)
+        self._joint_buffer.append((sample_time_ns, positions))
+        if self._is_execution_timestamp(sample_time_ns):
             self._execution_joint_samples.append(
-                (sample_time, positions.copy())
+                (sample_time_ns, positions.copy())
             )
 
     def _on_depth(self, msg: Image):
@@ -350,34 +483,45 @@ class Inference(Node):
                 self.get_logger().error(message)
                 self._depth_encoding_error = message
             return
-        sample_time = stamp_seconds(msg)
-        self._depth_buffer.append((sample_time, frame))
-        if self._is_execution_timestamp(sample_time):
+        sample_time_ns = stamp_nanoseconds(msg)
+        self._depth_buffer.append(
+            (sample_time_ns, frame, msg.header.frame_id)
+        )
+        if self._is_execution_timestamp(sample_time_ns):
             self._execution_depth_samples.append(
-                (sample_time, frame.copy())
+                (sample_time_ns, frame.copy(), msg.header.frame_id)
             )
 
-    def _is_execution_timestamp(self, sample_time: float) -> bool:
+    def _is_execution_timestamp(self, sample_time_ns: int) -> bool:
         """Return whether a sensor sample belongs to the active trajectory."""
-        if not self._trajectory_active or self._execution_start_seconds is None:
+        if not self._trajectory_active or self._execution_start_ns is None:
             return False
-        if sample_time < self._execution_start_seconds:
+        if sample_time_ns < self._execution_start_ns:
             return False
         return (
-            self._execution_end_seconds is None or
-            sample_time <= self._execution_end_seconds
+            self._execution_end_ns is None or
+            sample_time_ns <= self._execution_end_ns
         )
 
     def _latest_synchronized_pair(self):
         """Pair the newest joint state with the closest acceptable depth."""
         if not self._joint_buffer or not self._depth_buffer:
             return None
-        joint_time, positions = self._joint_buffer[-1]
-        depth_time, depth = min(
-            self._depth_buffer, key=lambda item: abs(item[0] - joint_time))
-        if abs(depth_time - joint_time) > self.sync_tolerance:
+        joint_time_ns, positions = self._joint_buffer[-1]
+        depth_time_ns, depth, depth_frame_id = min(
+            self._depth_buffer,
+            key=lambda item: abs(item[0] - joint_time_ns),
+        )
+        if abs(depth_time_ns - joint_time_ns) > self.sync_tolerance_ns:
             return None
-        return positions.copy(), depth.copy(), float(self._gripper_state)
+        return (
+            positions.copy(),
+            depth.copy(),
+            float(self._gripper_state),
+            joint_time_ns,
+            depth_time_ns,
+            depth_frame_id,
+        )
 
     def _execution_candidates(self):
         """Return depth frames paired with joints at the camera timestamps."""
@@ -391,49 +535,74 @@ class Inference(Node):
             self._execution_depth_samples, key=lambda sample: sample[0]
         )
         joint_times = np.asarray(
-            [sample[0] for sample in joint_samples], dtype=np.float64
+            [sample[0] for sample in joint_samples], dtype=np.int64
         )
         joint_positions = np.stack(
             [sample[1] for sample in joint_samples]
         ).astype(np.float64)
 
         candidates = []
-        for depth_time, depth in depth_samples:
-            right = int(np.searchsorted(joint_times, depth_time, side='left'))
+        for depth_time_ns, depth, depth_frame_id in depth_samples:
+            right = int(np.searchsorted(
+                joint_times, depth_time_ns, side='left'
+            ))
             position = None
+            before_stamp_ns = None
+            after_stamp_ns = None
+            interpolation_alpha = None
 
             if 0 < right < len(joint_times):
                 left = right - 1
-                before_gap = depth_time - joint_times[left]
-                after_gap = joint_times[right] - depth_time
-                if (before_gap <= self.sync_tolerance and
-                        after_gap <= self.sync_tolerance):
+                before_gap = depth_time_ns - joint_times[left]
+                after_gap = joint_times[right] - depth_time_ns
+                if (before_gap <= self.sync_tolerance_ns and
+                        after_gap <= self.sync_tolerance_ns):
                     span = joint_times[right] - joint_times[left]
                     if span > 0.0:
-                        alpha = before_gap / span
-                        position = (
-                            joint_positions[left] +
-                            alpha * (
-                                joint_positions[right] - joint_positions[left]
+                        position, interpolation_alpha = (
+                            interpolate_joint_positions(
+                                int(joint_times[left]),
+                                joint_positions[left],
+                                int(joint_times[right]),
+                                joint_positions[right],
+                                int(depth_time_ns),
                             )
                         )
                     else:
                         position = joint_positions[left].copy()
+                    before_stamp_ns = int(joint_times[left])
+                    after_stamp_ns = int(joint_times[right])
 
             if position is None:
                 nearest = min(
                     range(len(joint_times)),
-                    key=lambda index: abs(joint_times[index] - depth_time),
+                    key=lambda index: abs(
+                        joint_times[index] - depth_time_ns
+                    ),
                 )
-                if abs(joint_times[nearest] - depth_time) > self.sync_tolerance:
+                if (abs(joint_times[nearest] - depth_time_ns) >
+                        self.sync_tolerance_ns):
                     continue
                 position = joint_positions[nearest].copy()
+                before_stamp_ns = int(joint_times[nearest])
+                after_stamp_ns = int(joint_times[nearest])
 
-            candidates.append((depth_time, position, depth.copy()))
+            candidates.append(ExecutionCandidate(
+                stamp_ns=int(depth_time_ns),
+                positions=position,
+                depth=depth.copy(),
+                depth_frame_id=depth_frame_id,
+                joint_before_stamp_ns=before_stamp_ns,
+                joint_after_stamp_ns=after_stamp_ns,
+                interpolation_alpha=interpolation_alpha,
+            ))
         return candidates
 
     def _select_action_observations(
-        self, desired_positions: np.ndarray, gripper_states: np.ndarray
+        self,
+        chunk_index: int,
+        desired_positions: np.ndarray,
+        gripper_states: np.ndarray,
     ):
         """Match ordered camera/joint observations to the final action targets."""
         first_action = self.action_chunk_length - self.observation_length
@@ -447,15 +616,24 @@ class Inference(Node):
         )
         candidates = self._execution_candidates()
         if len(candidates) < len(targets):
-            self.get_logger().error(
+            detail = (
                 'Not enough synchronized execution observations: got '
                 f'{len(candidates)}, need {len(targets)} including the '
                 'ordering anchor.'
             )
+            self.get_logger().error(detail)
+            self._emit_event(
+                'selection_failed',
+                chunk_index=chunk_index,
+                reason='insufficient_candidates',
+                detail=detail,
+                candidate_count=len(candidates),
+                required_candidate_count=len(targets),
+            )
             return None
 
         candidate_positions = np.stack([
-            candidate[1] for candidate in candidates
+            candidate.positions for candidate in candidates
         ])
         absolute_error = np.abs(
             targets[:, np.newaxis, :] -
@@ -498,13 +676,23 @@ class Inference(Node):
         final_candidate = int(np.argmin(accumulated[-1]))
         if not np.isfinite(accumulated[-1, final_candidate]):
             closest_errors = np.min(max_joint_error, axis=1)
-            self.get_logger().error(
+            detail = (
                 'Could not match an ordered observation to the anchor and '
                 'every final action '
                 'within joint_match_tolerance_rad='
                 f'{self.joint_match_tolerance:.4f}. Closest per-target '
                 'maximum joint errors were: '
                 + np.array2string(closest_errors, precision=5)
+            )
+            self.get_logger().error(detail)
+            self._emit_event(
+                'selection_failed',
+                chunk_index=chunk_index,
+                reason='joint_tolerance',
+                detail=detail,
+                candidate_count=len(candidates),
+                closest_max_joint_errors_rad=closest_errors.tolist(),
+                joint_match_tolerance_rad=self.joint_match_tolerance,
             )
             return None
 
@@ -517,25 +705,84 @@ class Inference(Node):
         selected_indices.reverse()
 
         observations = []
+        trace_observations = []
         output_indices = selected_indices[output_offset:]
         for target_offset, candidate_index in enumerate(output_indices):
-            depth_time, positions, depth = candidates[candidate_index]
+            candidate = candidates[candidate_index]
             action_index = first_action + target_offset
             error = max_joint_error[
                 output_offset + target_offset, candidate_index
             ]
+            desired = targets[output_offset + target_offset]
+            observation_id = selected_observation_id(
+                chunk_index, action_index + 1
+            )
             self.get_logger().debug(
                 f'Matched action {action_index + 1} to depth frame at '
-                f'{depth_time:.6f} with maximum joint error {error:.6f} rad.'
+                f'{candidate.stamp_ns} ns with maximum joint error '
+                f'{error:.6f} rad.'
             )
-            observations.append((
-                positions.astype(np.float32, copy=True),
-                depth.copy(),
-                float(gripper_states[action_index]),
-            ))
+            observation = ModelObservation(
+                observation_id=observation_id,
+                stamp_ns=candidate.stamp_ns,
+                positions=candidate.positions.astype(
+                    np.float32, copy=True
+                ),
+                depth=candidate.depth.copy(),
+                gripper_state=float(gripper_states[action_index]),
+                depth_frame_id=candidate.depth_frame_id,
+                joint_before_stamp_ns=candidate.joint_before_stamp_ns,
+                joint_after_stamp_ns=candidate.joint_after_stamp_ns,
+                interpolation_alpha=candidate.interpolation_alpha,
+            )
+            signed_error = (
+                observation.positions.astype(np.float64) - desired
+            )
+            error = float(np.max(np.abs(signed_error)))
+            observations.append(observation)
+            self._publish_joint_debug(
+                self._selected_joint_publisher,
+                observation.stamp_ns,
+                observation.positions,
+                candidate.depth_frame_id,
+            )
+            self._publish_joint_debug(
+                self._matched_target_publisher,
+                observation.stamp_ns,
+                desired,
+                candidate.depth_frame_id,
+            )
+            self._publish_depth_debug(
+                observation.stamp_ns,
+                observation.depth,
+                candidate.depth_frame_id,
+            )
+            trace_observations.append({
+                'observation_id': observation_id,
+                'action_index': action_index + 1,
+                'selected_depth_stamp_ns': observation.stamp_ns,
+                'selected_depth_frame_id': candidate.depth_frame_id,
+                'selected_depth_sha256': depth_sha256(observation.depth),
+                'joint_before_stamp_ns': candidate.joint_before_stamp_ns,
+                'joint_after_stamp_ns': candidate.joint_after_stamp_ns,
+                'interpolation_alpha': candidate.interpolation_alpha,
+                'positions': observation.positions.tolist(),
+                'desired_positions': desired.tolist(),
+                'signed_error_rad': signed_error.tolist(),
+                'max_abs_error_rad': error,
+                'gripper_state': int(gripper_states[action_index]),
+            })
+        self._emit_event(
+            'selection_complete',
+            chunk_index=chunk_index,
+            candidate_count=len(candidates),
+            joint_match_tolerance_rad=self.joint_match_tolerance,
+            observations=trace_observations,
+        )
         return observations
 
     def _bootstrap_observations(self) -> bool:
+        self._emit_phase('bootstrap')
         self.get_logger().info(
             'Waiting for the first synchronized joint/depth observation ...')
         deadline = self.get_clock().now() + rclpy.duration.Duration(seconds=10.0)
@@ -548,20 +795,57 @@ class Inference(Node):
         if pair is None:
             self.get_logger().error(
                 'Timed out waiting for synchronized joint and depth data.')
-            return False
-        for _ in range(self.observation_length):
-            self._observations.append(
-                (pair[0].copy(), pair[1].copy(), pair[2])
+            self._emit_event(
+                'bootstrap_failed', reason='sensor_timeout'
             )
+            return False
+        observation = ModelObservation(
+            observation_id='bootstrap-000001',
+            stamp_ns=pair[4],
+            positions=pair[0].copy(),
+            depth=pair[1].copy(),
+            gripper_state=pair[2],
+            depth_frame_id=pair[5],
+            joint_before_stamp_ns=pair[3],
+            joint_after_stamp_ns=pair[3],
+            interpolation_alpha=None,
+        )
+        for _ in range(self.observation_length):
+            self._observations.append(observation)
+        self._publish_joint_debug(
+            self._selected_joint_publisher,
+            observation.stamp_ns,
+            observation.positions,
+            observation.depth_frame_id,
+        )
+        self._publish_depth_debug(
+            observation.stamp_ns,
+            observation.depth,
+            observation.depth_frame_id,
+        )
+        self._emit_event(
+            'bootstrap_complete',
+            observation_id=observation.observation_id,
+            repeated_count=self.observation_length,
+            selected_depth_stamp_ns=observation.stamp_ns,
+            selected_depth_frame_id=observation.depth_frame_id,
+            selected_depth_sha256=depth_sha256(observation.depth),
+            joint_stamp_ns=observation.joint_before_stamp_ns,
+            positions=observation.positions.tolist(),
+            gripper_state=int(observation.gripper_state),
+        )
         self.get_logger().info(
             f'Initial observation repeated {self.observation_length} times.')
         return True
 
     def _model_inputs(self):
         joints = np.stack([
-            np.append(sample[0], sample[2]) for sample in self._observations
+            np.append(sample.positions, sample.gripper_state)
+            for sample in self._observations
         ]).astype(np.float32)
-        depth = np.stack([sample[1] for sample in self._observations])
+        depth = np.stack([
+            sample.depth for sample in self._observations
+        ])
         return joints, depth
 
     @torch.inference_mode()
@@ -740,14 +1024,24 @@ class Inference(Node):
         self._gripper_state = state
         return True
 
-    def execute_chunk(self, deltas, gripper_states) -> bool:
+    def _fail_chunk(self, chunk_index: int, reason: str, **payload) -> bool:
+        self._last_failure_reason = reason
+        self._emit_event(
+            'execution_result',
+            chunk_index=chunk_index,
+            status='failed',
+            reason=reason,
+            **payload,
+        )
+        return False
+
+    def execute_chunk(self, chunk_index, deltas, gripper_states) -> bool:
+        self._last_failure_reason = None
         seed = self._current_joint_position()
         if seed is None:
             self.get_logger().error('No joint state available for action seed.')
-            return False
-        desired_positions = seed + np.cumsum(
-            np.asarray(deltas, dtype=np.float64), axis=0
-        )
+            return self._fail_chunk(chunk_index, 'missing_action_seed')
+        desired_positions = integrate_joint_deltas(seed, deltas)
         goal = FollowJointTrajectory.Goal()
         goal.trajectory = self._build_trajectory(seed, deltas)
         try:
@@ -756,16 +1050,40 @@ class Inference(Node):
             handle = send_future.result()
             if handle is None or not handle.accepted:
                 self.get_logger().error('Trajectory goal was rejected.')
-                return False
+                return self._fail_chunk(chunk_index, 'goal_rejected')
 
             result_future = handle.get_result_async()
             self._trajectory_result_future = result_future
             start_time = self.get_clock().now()
-            self._execution_start_seconds = start_time.nanoseconds * 1e-9
-            self._execution_end_seconds = None
+            self._execution_start_ns = int(start_time.nanoseconds)
+            self._execution_end_ns = None
             self._execution_joint_samples = []
             self._execution_depth_samples = []
             self._trajectory_active = True
+            planned_stamps_ns = [
+                self._execution_start_ns + int(round(
+                    (index + 1) * self.dt * 1e9
+                ))
+                for index in range(self.action_chunk_length)
+            ]
+            for stamp_ns, positions in zip(
+                    planned_stamps_ns, desired_positions):
+                self._publish_joint_debug(
+                    self._planned_target_publisher,
+                    stamp_ns,
+                    positions,
+                )
+            self._emit_phase('execution')
+            self._emit_event(
+                'execution_start',
+                chunk_index=chunk_index,
+                execution_start_ns=self._execution_start_ns,
+                seed_positions=seed.tolist(),
+                desired_positions=desired_positions.tolist(),
+                joint_deltas=np.asarray(deltas).tolist(),
+                gripper_states=np.asarray(gripper_states).astype(int).tolist(),
+                planned_target_stamps_ns=planned_stamps_ns,
+            )
             gripper_index = 0
             while rclpy.ok() and not result_future.done():
                 rclpy.spin_once(self, timeout_sec=0.01)
@@ -776,27 +1094,42 @@ class Inference(Node):
                     if not self._apply_gripper_state(
                             int(gripper_states[gripper_index])):
                         handle.cancel_goal_async()
-                        return False
+                        return self._fail_chunk(
+                            chunk_index,
+                            'gripper_command_failed',
+                            action_index=gripper_index + 1,
+                        )
                     gripper_index += 1
 
-            self._execution_end_seconds = (
-                self.get_clock().now().nanoseconds * 1e-9
-            )
+            self._execution_end_ns = self._now_ns()
 
             wrapper = result_future.result()
             if wrapper is None:
                 self.get_logger().error('Trajectory result was unavailable.')
-                return False
+                return self._fail_chunk(
+                    chunk_index, 'trajectory_result_unavailable'
+                )
             result = wrapper.result
             if result.error_code != 0:
                 self.get_logger().error(
                     f'Trajectory failed: {result.error_code} '
                     f'({result.error_string})')
-                return False
+                return self._fail_chunk(
+                    chunk_index,
+                    'trajectory_failed',
+                    controller_error_code=int(result.error_code),
+                    controller_error_string=result.error_string,
+                    execution_start_ns=self._execution_start_ns,
+                    execution_end_ns=self._execution_end_ns,
+                )
             while gripper_index < self.action_chunk_length:
                 if not self._apply_gripper_state(
                         int(gripper_states[gripper_index])):
-                    return False
+                    return self._fail_chunk(
+                        chunk_index,
+                        'gripper_command_failed',
+                        action_index=gripper_index + 1,
+                    )
                 gripper_index += 1
 
             # Sensor messages captured during the trajectory may arrive after
@@ -812,27 +1145,39 @@ class Inference(Node):
                 rclpy.spin_once(self, timeout_sec=0.01)
                 joint_caught_up = (
                     self._joint_buffer and
-                    self._joint_buffer[-1][0] >= self._execution_end_seconds
+                    self._joint_buffer[-1][0] >= self._execution_end_ns
                 )
                 depth_caught_up = (
                     self._depth_buffer and
-                    self._depth_buffer[-1][0] >= self._execution_end_seconds
+                    self._depth_buffer[-1][0] >= self._execution_end_ns
                 )
                 if joint_caught_up and depth_caught_up:
                     break
 
+            self._emit_event(
+                'execution_result',
+                chunk_index=chunk_index,
+                status='succeeded',
+                controller_error_code=int(result.error_code),
+                execution_start_ns=self._execution_start_ns,
+                execution_end_ns=self._execution_end_ns,
+                captured_joint_count=len(self._execution_joint_samples),
+                captured_depth_count=len(self._execution_depth_samples),
+            )
+            self._emit_phase('selection')
             observations = self._select_action_observations(
-                desired_positions, gripper_states
+                chunk_index, desired_positions, gripper_states
             )
             if observations is None:
+                self._last_failure_reason = 'selection_failed'
                 return False
             self._observations.extend(observations)
             return True
         finally:
             self._trajectory_active = False
             self._trajectory_result_future = None
-            self._execution_start_seconds = None
-            self._execution_end_seconds = None
+            self._execution_start_ns = None
+            self._execution_end_ns = None
             self._execution_joint_samples = []
             self._execution_depth_samples = []
 
@@ -881,32 +1226,108 @@ class Inference(Node):
         self.get_logger().info('Home position reached.')
         return True
 
+    def _finish_run(self, status: str, reason: str, exit_code: int) -> int:
+        self._emit_phase('stopped')
+        self._emit_event(
+            'run_end',
+            status=status,
+            reason=reason,
+            exit_code=exit_code,
+        )
+        if self.debug_enabled and rclpy.ok():
+            rclpy.spin_once(self, timeout_sec=0.05)
+        return exit_code
+
     def run(self) -> int:
         if not self._wait_for_controller():
-            return 1
+            return self._finish_run('failed', 'controller_unavailable', 1)
         if not self._move_home():
-            return 1
+            return self._finish_run('failed', 'home_move_failed', 1)
         if not self._bootstrap_observations():
-            return 1
+            return self._finish_run('failed', 'bootstrap_failed', 1)
         chunk_number = 0
         while rclpy.ok():
             chunk_number += 1
+            inference_start_ns = self._now_ns()
+            self._emit_phase('inference')
+            input_observation_ids = [
+                observation.observation_id
+                for observation in self._observations
+            ]
+            input_depth_hashes = [
+                depth_sha256(observation.depth)
+                for observation in self._observations
+            ]
+            joint_history, depth_history = self._model_inputs()
             try:
                 output = self._validate_model_output(
-                    self.run_model(*self._model_inputs()))
+                    self.run_model(joint_history, depth_history))
             except Exception as exc:
                 self.get_logger().error(f'Model inference failed: {exc}')
                 self.get_logger().error(traceback.format_exc())
-                return 1
+                self._emit_event(
+                    'inference_failed',
+                    chunk_index=chunk_number,
+                    inference_start_ns=inference_start_ns,
+                    inference_end_ns=self._now_ns(),
+                    input_observation_ids=input_observation_ids,
+                    error=str(exc),
+                )
+                return self._finish_run('failed', 'inference_failed', 1)
             if output is None:
                 self.get_logger().warning(
                     'run_model returned None; implement it to produce actions.')
-                return 0
+                self._emit_event(
+                    'inference_failed',
+                    chunk_index=chunk_number,
+                    inference_start_ns=inference_start_ns,
+                    inference_end_ns=self._now_ns(),
+                    input_observation_ids=input_observation_ids,
+                    error='run_model returned None',
+                )
+                return self._finish_run('stopped', 'no_model_output', 0)
+            inference_end_ns = self._now_ns()
+            self._emit_event(
+                'inference_complete',
+                chunk_index=chunk_number,
+                inference_start_ns=inference_start_ns,
+                inference_end_ns=inference_end_ns,
+                inference_duration_ns=(
+                    inference_end_ns - inference_start_ns
+                ),
+                input_observation_ids=input_observation_ids,
+                input_depth_sha256=input_depth_hashes,
+                model_input_joint_gripper=joint_history.tolist(),
+                joint_deltas=output[0].tolist(),
+                gripper_states=output[1].astype(int).tolist(),
+            )
             self.get_logger().info(
                 f'Executing policy action chunk {chunk_number}.')
-            if not self.execute_chunk(*output):
-                return 1
-        return 0
+            try:
+                chunk_succeeded = self.execute_chunk(
+                    chunk_number, *output
+                )
+            except Exception as exc:
+                self.get_logger().error(
+                    f'Action chunk {chunk_number} failed: {exc}'
+                )
+                self.get_logger().error(traceback.format_exc())
+                self._last_failure_reason = 'execution_exception'
+                self._emit_event(
+                    'execution_result',
+                    chunk_index=chunk_number,
+                    status='failed',
+                    reason='execution_exception',
+                    error=str(exc),
+                )
+                chunk_succeeded = False
+            if not chunk_succeeded:
+                return self._finish_run(
+                    'failed',
+                    self._last_failure_reason or 'chunk_failed',
+                    1,
+                )
+        return self._finish_run('stopped', 'rclpy_shutdown', 0)
 
 
 def main(args=None):
@@ -919,6 +1340,13 @@ def main(args=None):
     except (ValueError, KeyboardInterrupt) as exc:
         if node is not None and not isinstance(exc, KeyboardInterrupt):
             node.get_logger().error(str(exc))
+        if node is not None:
+            reason = (
+                'keyboard_interrupt'
+                if isinstance(exc, KeyboardInterrupt)
+                else 'startup_error'
+            )
+            node._finish_run('failed', reason, 1)
     finally:
         if node is not None:
             node.destroy_node()

@@ -10,6 +10,7 @@ RUN apt-get update && apt-get install -y \
     ros-humble-foxglove-bridge \
     ros-humble-joint-state-publisher \
     ros-humble-moveit \
+    ros-humble-rosbag2-storage-mcap \
     git \
     python3-colcon-common-extensions \
     python3-pip \

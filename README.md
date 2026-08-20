@@ -203,6 +203,41 @@ ros2 run bc_pipeline dummy_inference --ros-args \
   -p run:=/root/ros2_ws/runs/drawer_2026-06-20_14-14-03
 ```
 
+### Run model inference with debug recording
+
+The inference launch starts the policy, a high-rate joint-state canonicalizer,
+and an indexed, Zstd-compressed MCAP recorder. Rebuild the Docker image once so
+the MCAP storage plugin is installed, then build and source `bc_pipeline`.
+
+```bash
+ros2 launch bc_pipeline inference.launch.py \
+  checkpoint_path:=/root/ros2_ws/checkpoints/model.pt
+```
+
+Override the output base path or load additional inference parameters when
+needed:
+
+```bash
+ros2 launch bc_pipeline inference.launch.py \
+  checkpoint_path:=/root/ros2_ws/checkpoints/model.pt \
+  bag_uri:=/root/ros2_ws/runs/inference \
+  params_file:=/root/ros2_ws/inference_params.yaml
+```
+
+The launch prints the timestamped bag path. After the bag closes, export its
+versioned event stream to a JSON sidecar:
+
+```bash
+cd /root/ros2_ws/src/processing
+python3 export_inference_trace.py /root/ros2_ws/runs/inference_<timestamp>
+```
+
+Open the resulting MCAP in Foxglove and load `foxglove-layout.json`. The
+**Inference Debug** tab overlays measured joints, planned model targets, matched
+targets, selected observations, depth-frame timing, controller state, and
+inference/execution phases. The JSON exporter also verifies that every selected
+depth hash matches the exact processed `32FC1` image stored in the bag.
+
 ---
 
 # Stereolabs ZED2i camera

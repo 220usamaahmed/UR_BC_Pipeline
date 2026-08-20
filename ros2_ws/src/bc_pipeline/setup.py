@@ -33,6 +33,8 @@ setup(
             'scene_publisher = bc_pipeline.scene_publisher:main',
             'dummy_inference = bc_pipeline.dummy_inference:main',
             'inference = bc_pipeline.inference:main',
+            'joint_state_canonicalizer = '
+            'bc_pipeline.joint_state_canonicalizer:main',
         ],
     },
 )

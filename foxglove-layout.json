@@ -179,6 +179,278 @@
       "topicPath": "/dynamic_joint_states",
       "defaultExpanded": false
     },
+    "Plot!inferenceJoints": {
+      "paths": [
+        {
+          "value": "/bc_pipeline/inference/joint_states_canonical.position[0]",
+          "label": "pan measured",
+          "enabled": true,
+          "color": "#4e98e2",
+          "timestampMethod": "headerStamp",
+          "showLine": true
+        },
+        {
+          "value": "/bc_pipeline/inference/joint_states_canonical.position[1]",
+          "label": "wrist 2 measured",
+          "enabled": true,
+          "color": "#f5774d",
+          "timestampMethod": "headerStamp",
+          "showLine": true
+        },
+        {
+          "value": "/bc_pipeline/inference/joint_states_canonical.position[2]",
+          "label": "wrist 3 measured",
+          "enabled": true,
+          "color": "#f7df71",
+          "timestampMethod": "headerStamp",
+          "showLine": true
+        },
+        {
+          "value": "/bc_pipeline/inference/joint_states_canonical.position[3]",
+          "label": "wrist 1 measured",
+          "enabled": true,
+          "color": "#5cd6a9",
+          "timestampMethod": "headerStamp",
+          "showLine": true
+        },
+        {
+          "value": "/bc_pipeline/inference/joint_states_canonical.position[4]",
+          "label": "elbow measured",
+          "enabled": true,
+          "color": "#61cbff",
+          "timestampMethod": "headerStamp",
+          "showLine": true
+        },
+        {
+          "value": "/bc_pipeline/inference/joint_states_canonical.position[5]",
+          "label": "lift measured",
+          "enabled": true,
+          "color": "#a395e2",
+          "timestampMethod": "headerStamp",
+          "showLine": true
+        },
+        {
+          "value": "/bc_pipeline/inference/action_targets_planned.position[0]",
+          "label": "pan planned",
+          "enabled": true,
+          "color": "#1d5f9f",
+          "timestampMethod": "headerStamp",
+          "showLine": false
+        },
+        {
+          "value": "/bc_pipeline/inference/action_targets_planned.position[1]",
+          "label": "wrist 2 planned",
+          "enabled": true,
+          "color": "#b83e1b",
+          "timestampMethod": "headerStamp",
+          "showLine": false
+        },
+        {
+          "value": "/bc_pipeline/inference/action_targets_planned.position[2]",
+          "label": "wrist 3 planned",
+          "enabled": true,
+          "color": "#aa8e00",
+          "timestampMethod": "headerStamp",
+          "showLine": false
+        },
+        {
+          "value": "/bc_pipeline/inference/action_targets_planned.position[3]",
+          "label": "wrist 1 planned",
+          "enabled": true,
+          "color": "#218965",
+          "timestampMethod": "headerStamp",
+          "showLine": false
+        },
+        {
+          "value": "/bc_pipeline/inference/action_targets_planned.position[4]",
+          "label": "elbow planned",
+          "enabled": true,
+          "color": "#147ca1",
+          "timestampMethod": "headerStamp",
+          "showLine": false
+        },
+        {
+          "value": "/bc_pipeline/inference/action_targets_planned.position[5]",
+          "label": "lift planned",
+          "enabled": true,
+          "color": "#654ca8",
+          "timestampMethod": "headerStamp",
+          "showLine": false
+        },
+        {
+          "value": "/bc_pipeline/inference/selected_joint_observations.position[0]",
+          "label": "pan selected",
+          "enabled": true,
+          "color": "#9bc9f4",
+          "timestampMethod": "headerStamp",
+          "showLine": false
+        },
+        {
+          "value": "/bc_pipeline/inference/selected_joint_observations.position[1]",
+          "label": "wrist 2 selected",
+          "enabled": true,
+          "color": "#ffad91",
+          "timestampMethod": "headerStamp",
+          "showLine": false
+        },
+        {
+          "value": "/bc_pipeline/inference/selected_joint_observations.position[2]",
+          "label": "wrist 3 selected",
+          "enabled": true,
+          "color": "#fff0a6",
+          "timestampMethod": "headerStamp",
+          "showLine": false
+        },
+        {
+          "value": "/bc_pipeline/inference/selected_joint_observations.position[3]",
+          "label": "wrist 1 selected",
+          "enabled": true,
+          "color": "#a4edd2",
+          "timestampMethod": "headerStamp",
+          "showLine": false
+        },
+        {
+          "value": "/bc_pipeline/inference/selected_joint_observations.position[4]",
+          "label": "elbow selected",
+          "enabled": true,
+          "color": "#b3e9ff",
+          "timestampMethod": "headerStamp",
+          "showLine": false
+        },
+        {
+          "value": "/bc_pipeline/inference/selected_joint_observations.position[5]",
+          "label": "lift selected",
+          "enabled": true,
+          "color": "#d0c4f5",
+          "timestampMethod": "headerStamp",
+          "showLine": false
+        },
+        {
+          "value": "/bc_pipeline/inference/action_targets_matched.position[0]",
+          "label": "pan target at match",
+          "enabled": false,
+          "color": "#1d5f9f",
+          "timestampMethod": "headerStamp",
+          "showLine": false
+        },
+        {
+          "value": "/bc_pipeline/inference/action_targets_matched.position[1]",
+          "label": "wrist 2 target at match",
+          "enabled": false,
+          "color": "#b83e1b",
+          "timestampMethod": "headerStamp",
+          "showLine": false
+        },
+        {
+          "value": "/bc_pipeline/inference/action_targets_matched.position[2]",
+          "label": "wrist 3 target at match",
+          "enabled": false,
+          "color": "#aa8e00",
+          "timestampMethod": "headerStamp",
+          "showLine": false
+        },
+        {
+          "value": "/bc_pipeline/inference/action_targets_matched.position[3]",
+          "label": "wrist 1 target at match",
+          "enabled": false,
+          "color": "#218965",
+          "timestampMethod": "headerStamp",
+          "showLine": false
+        },
+        {
+          "value": "/bc_pipeline/inference/action_targets_matched.position[4]",
+          "label": "elbow target at match",
+          "enabled": false,
+          "color": "#147ca1",
+          "timestampMethod": "headerStamp",
+          "showLine": false
+        },
+        {
+          "value": "/bc_pipeline/inference/action_targets_matched.position[5]",
+          "label": "lift target at match",
+          "enabled": false,
+          "color": "#654ca8",
+          "timestampMethod": "headerStamp",
+          "showLine": false
+        }
+      ],
+      "showLegend": true,
+      "foxglovePanelTitle": "Inference joints: measured, targets, selections"
+    },
+    "Plot!inferenceSensors": {
+      "paths": [
+        {
+          "value": "/zed/zed_node/depth/depth_registered.width",
+          "label": "raw depth frame",
+          "enabled": true,
+          "color": "#4e98e2",
+          "timestampMethod": "headerStamp",
+          "showLine": false
+        },
+        {
+          "value": "/bc_pipeline/inference/selected_depth.width",
+          "label": "selected depth frame",
+          "enabled": true,
+          "color": "#f5774d",
+          "timestampMethod": "headerStamp",
+          "showLine": false
+        }
+      ],
+      "showLegend": true,
+      "foxglovePanelTitle": "Depth frame timing"
+    },
+    "StateTransitions!inferencePhases": {
+      "paths": [
+        {
+          "value": "/bc_pipeline/inference/phase.data",
+          "timestampMethod": "receiveTime"
+        }
+      ],
+      "foxglovePanelTitle": "Inference phases"
+    },
+    "Image!inferenceRawDepth": {
+      "cameraTopic": "/zed/zed_node/depth/depth_registered",
+      "enabledMarkerTopics": [],
+      "customMarkerTopicOptions": [],
+      "synchronize": false,
+      "mode": "fit",
+      "zoom": 1,
+      "foxglovePanelTitle": "Raw registered depth"
+    },
+    "Image!inferenceSelectedDepth": {
+      "cameraTopic": "/bc_pipeline/inference/selected_depth",
+      "enabledMarkerTopics": [],
+      "customMarkerTopicOptions": [],
+      "synchronize": false,
+      "mode": "fit",
+      "zoom": 1,
+      "foxglovePanelTitle": "Exact selected model depth"
+    },
+    "Plot!inferenceController": {
+      "paths": [
+        {
+          "value": "/scaled_joint_trajectory_controller/controller_state.actual.positions[:]",
+          "label": "controller actual",
+          "enabled": true,
+          "timestampMethod": "headerStamp",
+          "showLine": true
+        },
+        {
+          "value": "/scaled_joint_trajectory_controller/controller_state.desired.positions[:]",
+          "label": "controller desired",
+          "enabled": true,
+          "timestampMethod": "headerStamp",
+          "showLine": true
+        }
+      ],
+      "showLegend": true,
+      "foxglovePanelTitle": "Controller desired vs actual"
+    },
+    "RawMessages!inferenceEvents": {
+      "topicPath": "/bc_pipeline/inference/events",
+      "defaultExpanded": true,
+      "foxglovePanelTitle": "Inference trace events"
+    },
     "Tab!58e9vb": {
       "activeTabIdx": 0,
       "tabs": [
@@ -209,6 +481,40 @@
             },
             "second": "RawMessages!1x6aj9o",
             "splitPercentage": 69.68035254940278
+          }
+        },
+        {
+          "title": "Inference Debug",
+          "layout": {
+            "direction": "column",
+            "first": {
+              "direction": "row",
+              "first": "Plot!inferenceJoints",
+              "second": {
+                "direction": "column",
+                "first": "StateTransitions!inferencePhases",
+                "second": "Plot!inferenceSensors",
+                "splitPercentage": 48
+              },
+              "splitPercentage": 72
+            },
+            "second": {
+              "direction": "row",
+              "first": {
+                "direction": "row",
+                "first": "Image!inferenceRawDepth",
+                "second": "Image!inferenceSelectedDepth",
+                "splitPercentage": 50
+              },
+              "second": {
+                "direction": "column",
+                "first": "Plot!inferenceController",
+                "second": "RawMessages!inferenceEvents",
+                "splitPercentage": 52
+              },
+              "splitPercentage": 50
+            },
+            "splitPercentage": 58
           }
         }
       ]
