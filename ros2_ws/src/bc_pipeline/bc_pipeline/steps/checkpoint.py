@@ -21,8 +21,10 @@ OrientationLockCheckpoint rather than two separate steps:
 Because the checkpoint is defined in joint space but the offset is in metres, we
 ask MoveIt for the forward kinematics of the checkpoint angles (the pose those
 angles produce), add the offset to that pose's position, keep its orientation,
-and plan one free motion straight to that pose goal.  The arm therefore goes
-*directly* to the offset pose; it never stops at the un-offset checkpoint.
+and solve inverse kinematics using the checkpoint angles as the seed.  We then
+plan one free motion to that nearby joint solution.  The arm therefore goes
+*directly* to the offset pose; it never stops at the un-offset checkpoint, and
+the seed prevents an equivalent but distant elbow/wrist configuration.
 
 The direction is interpreted in robot.base_frame (the world frame), so e.g.
 direction [0,0,1] with distance 0.1 means "the checkpoint pose lifted 10 cm".
@@ -99,4 +101,10 @@ class Checkpoint(Step):
             f"{unit} → pose target "
             f"({pose.position.x:.3f}, {pose.position.y:.3f}, {pose.position.z:.3f})"
         )
-        return self.ctx.plan_and_execute_pose(pose)
+        # A bare pose goal permits a different UR IK branch, causing elbow
+        # flips and unnecessary wrist winding. Seed IK from the checkpoint and
+        # plan to the resulting nearby joint target instead.
+        target_angles = self.ctx.compute_ik_near(pose, self.angles)
+        if target_angles is None:
+            return False
+        return self.ctx.plan_and_execute_joints(target_angles)

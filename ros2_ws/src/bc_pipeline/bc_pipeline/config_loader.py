@@ -135,6 +135,13 @@ def _validate_planning(config: dict):
     for key in ('velocity_scaling', 'accel_scaling', 'planning_time'):
         if key not in planning:
             raise ConfigError(f"planning section is missing '{key}'.")
+    if 'max_ik_joint_deviation' in planning:
+        value = planning['max_ik_joint_deviation']
+        if not isinstance(value, (int, float)) or isinstance(value, bool) or value <= 0:
+            raise ConfigError("planning.max_ik_joint_deviation must be positive radians.")
+    for key in ('pipeline_id', 'planner_id'):
+        if key in planning and not isinstance(planning[key], str):
+            raise ConfigError(f'planning.{key} must be a string.')
 
 
 def _validate_checkpoints(config: dict):

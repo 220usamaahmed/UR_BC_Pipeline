@@ -40,6 +40,7 @@ CONFIG = {
         'velocity_scaling': 0.2,
         'accel_scaling': 0.2,
         'planning_time': 5.0,
+        'max_ik_joint_deviation': 1.5708,
     },
     'checkpoints': {
         'home': HOME_NOISY,

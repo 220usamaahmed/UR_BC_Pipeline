@@ -25,6 +25,11 @@ planning:
   velocity_scaling: 0.2
   accel_scaling: 0.2
   planning_time: 5.0
+  # Keep offset-pose IK on the checkpoint's nearby joint branch (radians).
+  max_ik_joint_deviation: 1.5708
+  # If move_group has Pilz configured, enable predictable point-to-point moves:
+  # pipeline_id: pilz_industrial_motion_planner
+  # planner_id: PTP
 
 # Named joint positions, reused by Checkpoint steps. Each list has one value per
 # robot.joint_names (6 here). Values are in DEGREES; the config loader converts

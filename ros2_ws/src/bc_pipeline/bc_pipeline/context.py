@@ -20,6 +20,8 @@ server_is_ready() + spin_once() rather than wait_for_server(), which can block
 forever in Docker when topic-endpoint DDS discovery is unreliable.
 """
 
+import math
+
 import rclpy
 import rclpy.duration
 import rclpy.time
@@ -38,7 +40,7 @@ from moveit_msgs.msg import (
     PlanningOptions,
     PositionConstraint,
 )
-from moveit_msgs.srv import GetCartesianPath, GetPositionFK
+from moveit_msgs.srv import GetCartesianPath, GetPositionFK, GetPositionIK
 from shape_msgs.msg import SolidPrimitive
 from std_msgs.msg import String
 
@@ -58,6 +60,11 @@ class Context:
         self.velocity_scaling = float(planning['velocity_scaling'])
         self.accel_scaling = float(planning['accel_scaling'])
         self.planning_time = float(planning['planning_time'])
+        self.pipeline_id = str(planning.get('pipeline_id', ''))
+        self.planner_id = str(planning.get('planner_id', ''))
+        self.max_ik_joint_deviation = float(
+            planning.get('max_ik_joint_deviation', math.pi / 2.0)
+        )
 
         self.checkpoints = config['checkpoints']
 
@@ -71,6 +78,7 @@ class Context:
         # Forward kinematics: maps a set of joint angles to the EEF pose, so a
         # joint-space checkpoint can be combined with a Cartesian offset.
         self.fk_client = node.create_client(GetPositionFK, 'compute_fk')
+        self.ik_client = node.create_client(GetPositionIK, 'compute_ik')
 
         # ecpmi_gripper's suction_gripper_controller (real hardware only — see
         # its README). Not waited on in wait_for_servers(): most sequences run
@@ -106,6 +114,8 @@ class Context:
             self.logger.info('  compute_cartesian_path not ready yet …')
         while not self.fk_client.wait_for_service(timeout_sec=0.5):
             self.logger.info('  compute_fk not ready yet …')
+        while not self.ik_client.wait_for_service(timeout_sec=0.5):
+            self.logger.info('  compute_ik not ready yet …')
         self.logger.info('All servers ready.')
 
     # ── joint-space plan + execute (used by Checkpoint) ────────────────────────
@@ -168,6 +178,8 @@ class Context:
         """Send a MoveGroup goal with the given goal constraints, then block."""
         request = MotionPlanRequest()
         request.group_name = self.planning_group
+        request.pipeline_id = self.pipeline_id
+        request.planner_id = self.planner_id
         request.allowed_planning_time = self.planning_time
         request.num_planning_attempts = 10
         request.max_velocity_scaling_factor = self.velocity_scaling
@@ -224,6 +236,52 @@ class Context:
             self.logger.error(f'compute_fk failed (error code {code}).')
             return None
         return response.pose_stamped[0].pose
+
+    def compute_ik_near(self, pose: Pose, seed_angles: list) -> list | None:
+        """Solve a pose using a named checkpoint as the preferred IK branch."""
+        req = GetPositionIK.Request()
+        ik = req.ik_request
+        ik.group_name = self.planning_group
+        ik.ik_link_name = self.eef_link
+        ik.pose_stamped.header.frame_id = self.base_frame
+        ik.pose_stamped.header.stamp = self.node.get_clock().now().to_msg()
+        ik.pose_stamped.pose = pose
+        ik.robot_state.joint_state.name = list(self.joint_names)
+        ik.robot_state.joint_state.position = [float(a) for a in seed_angles]
+        ik.avoid_collisions = True
+        ik.timeout = rclpy.duration.Duration(seconds=self.planning_time).to_msg()
+
+        future = self.ik_client.call_async(req)
+        rclpy.spin_until_future_complete(self.node, future)
+        response = future.result()
+        if response is None or response.error_code.val != 1:
+            code = None if response is None else response.error_code.val
+            self.logger.error(f'compute_ik failed (error code {code}).')
+            return None
+
+        state = response.solution.joint_state
+        by_name = dict(zip(state.name, state.position))
+        if any(name not in by_name for name in self.joint_names):
+            self.logger.error('compute_ik response is missing one or more arm joints.')
+            return None
+
+        solution = [float(by_name[name]) for name in self.joint_names]
+        deviations = [
+            abs(math.atan2(math.sin(value - seed), math.cos(value - seed)))
+            for value, seed in zip(solution, seed_angles)
+        ]
+        if max(deviations, default=0.0) > self.max_ik_joint_deviation:
+            details = ', '.join(
+                f'{name}={math.degrees(delta):.1f}°'
+                for name, delta in zip(self.joint_names, deviations)
+            )
+            self.logger.error(
+                'IK solution left the checkpoint joint branch '
+                f'(limit {math.degrees(self.max_ik_joint_deviation):.1f}°; '
+                f'{details}).'
+            )
+            return None
+        return solution
 
     # ── trajectory scaling ───────────────────────────────────────────────────────
 

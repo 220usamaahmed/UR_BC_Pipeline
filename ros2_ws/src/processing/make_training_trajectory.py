@@ -254,8 +254,11 @@ def process_trajectory(save_kwargs: dict) -> dict:
     if not ('checkpoint' in first_step_lower and 'home' in first_step_lower):
         return processed
 
-    # Find indices where step is NOT the first step
-    keep_mask = processed['steps'] != first_step
+    # Remove only the contiguous first step. The same checkpoint may occur again
+    # later in the trajectory and must not be removed.
+    first_different = np.flatnonzero(processed['steps'] != first_step)
+    first_step_end = first_different[0] if len(first_different) else len(processed['steps'])
+    keep_mask = np.arange(len(processed['steps'])) >= first_step_end
 
     # Apply mask to all position-aligned arrays
     processed['positions'] = processed['positions'][keep_mask]

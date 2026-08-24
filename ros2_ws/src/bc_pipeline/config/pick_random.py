@@ -10,12 +10,13 @@ record_sequence.launch.py.
 import random
 
 HOME_BASE = [-90.00, 0.00, -90.00, 0.00, 90.00, -0.00]
-HOME_NOISY = [round(angle + random.uniform(-2, 2), 2) for angle in HOME_BASE]
+HOME_NOISY = [round(angle + random.uniform(-5, 5), 2) for angle in HOME_BASE]
 
 # Pick Center
 PICK = [-120.90, -67.13, -81.87, 90.08, 88.17, -72.87]
+# [-59.57, 67.02, -97.55, -89.58, 88.09, 72.35]
 
-PICK_APPROACH_OFFSET = random.uniform(0.02, 0.04)
+PICK_APPROACH_OFFSET = random.uniform(0.02, 0.06)
 
 CONFIG = {
     'robot': {
@@ -35,13 +36,15 @@ CONFIG = {
         'velocity_scaling': 0.2,
         'accel_scaling': 0.2,
         'planning_time': 5.0,
+        'max_ik_joint_deviation': 1.5708,
     },
     'checkpoints': {
-        'home': HOME_NOISY,
+        'home': HOME_BASE,
+        'home_noisy': HOME_NOISY,
         'pick': PICK,
     },
     'steps': [
-        {'type': 'Checkpoint', 'checkpoint': 'home'},
+        {'type': 'Checkpoint', 'checkpoint': 'home_noisy'},
         {'type': 'Checkpoint', 'checkpoint': 'pick', 'cartesian_offset': {'direction': [0, 0, -1], 'distance': -PICK_APPROACH_OFFSET}},
         {'type': 'OrientationLockCheckpoint', 'frame': 'tool', 'axis': [0, 0, 1],
          'distance': PICK_APPROACH_OFFSET},
@@ -54,7 +57,7 @@ CONFIG = {
          'color': [0.6, 0.6, 0.6, 0.8]},
         {'id': 'wall', 'size': [0.02, 1.0, 1.0], 'position': [0.4, 0.0, 0.5],
          'color': [0.8, 0.2, 0.2, 0.6]},
-        {'id': 'right-wall', 'size': [0.02, 0.5, 0.5], 'position': [0.15, 0.25, 0.8],
+        {'id': 'side-wall', 'size': [0.02, 0.5, 0.5], 'position': [0.15, 0.25, 0.8],
          'color': [0.8, 0.2, 0.5, 0.6]},
         {'id': 'back-wall', 'size': [0.6, 0.02, 1.0], 'position': [0.0, -0.1, 0.5],
          'color': [0.8, 0.2, 0.2, 0.6]},
