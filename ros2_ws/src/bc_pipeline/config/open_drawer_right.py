@@ -1,6 +1,4 @@
 """
-Same experiment as drawer_demo.yaml, but in Python format for data augmentation.
-
 This is the .py convention: a module-level CONFIG dict, built with whatever
 Python you need (math, random, loops, ...). It's executed once by the launch
 file, which resolves it into a concrete YAML before any node reads it — see
@@ -11,11 +9,11 @@ import math
 import random
 
 HOME_BASE = [-90.00, 0.00, -90.00, 0.00, 90.00, -0.00]
-HOME_NOISY = [round(angle + random.uniform(-2, 2), 2) for angle in HOME_BASE]
+HOME_NOISY = [round(angle + random.uniform(-6, 6), 2) for angle in HOME_BASE]
 
 # Random offset within a 2cm radius circle (uniform distribution)
 APPROACH_ANGLE = random.uniform(0, 2 * math.pi)
-APPROACH_DISTANCE = math.sqrt(random.uniform(0, 1)) * 0.02
+APPROACH_DISTANCE = math.sqrt(random.uniform(0, 1)) * 0.03
 APPROACH_DIRECTION = [math.cos(APPROACH_ANGLE), 0, math.sin(APPROACH_ANGLE)]
 
 # Randomized push-back: move back 12cm + random up to 1cm, then complete to 14cm total
@@ -43,24 +41,25 @@ CONFIG = {
         'max_ik_joint_deviation': 1.5708,
     },
     'checkpoints': {
-        'home': HOME_NOISY,
-        'approach': [-108.18, -107.64, -150.28, -5.93, 94.92, -7.26],
+        'home': HOME_BASE,
+        'home_noisy': HOME_NOISY,
+        'approach': [-70.59, 105.89, -33.46, 5.91, 82.44, 6.08],
     },
     'steps': [
-        {'type': 'Checkpoint', 'checkpoint': 'home'},
-        {'type': 'Checkpoint', 'checkpoint': 'approach', 'cartesian_offset': {'direction': APPROACH_DIRECTION, 'distance': APPROACH_DISTANCE}},
+        {'type': 'Wait', 'duration': 1.0, 'ignore': True},
+        {'type': 'Checkpoint', 'checkpoint': 'home_noisy', 'ignore': True},
+        {'type': 'Checkpoint', 'checkpoint': 'approach', 'ignore': False, 'cartesian_offset': {'direction': APPROACH_DIRECTION, 'distance': APPROACH_DISTANCE}},
         {'type': 'OrientationLockCheckpoint', 'frame': 'tool', 'axis': [0, 0, 1],
-         'distance': 0.14},
-        # {'type': 'Wait', 'duration': 0.2},
-        {'type': 'Gripper', 'action': 'grip'},
-        # {'type': 'Wait', 'duration': 0.2},
-        {'type': 'Gripper', 'action': 'release'},
+         'distance': 0.14, 'ignore': False},
+        {'type': 'Gripper', 'action': 'grip', 'ignore': False},
+        {'type': 'Gripper', 'action': 'release', 'ignore': False},
         {'type': 'OrientationLockCheckpoint', 'frame': 'tool', 'axis': [0, 0, -1],
-         'distance': PULL_BACK_1},
-        {'type': 'Gripper', 'action': 'blow'},
+         'distance': PULL_BACK_1, 'ignore': False},
+        {'type': 'Gripper', 'action': 'blow', 'ignore': False},
         {'type': 'OrientationLockCheckpoint', 'frame': 'tool', 'axis': [0, 0, -1],
-         'distance': PULL_BACK_2},
-        {'type': 'Checkpoint', 'checkpoint': 'home'},
+         'distance': PULL_BACK_2, 'ignore': False},
+        {'type': 'Checkpoint', 'checkpoint': 'home', 'ignore': False},
+        {'type': 'Wait', 'duration': 1.0, 'ignore': True},
     ],
     'obstacles': [
         {'id': 'table', 'size': [1.2, 1.2, 0.02], 'position': [0.0, 0.0, -0.01],
@@ -73,7 +72,7 @@ CONFIG = {
          'color': [0.2, 0.5, 0.8, 0.6]},
     ],
     'recording': {
-        'bag_uri': '/data/external/open_left_drawer',
+        'bag_uri': '/data/external/trajectories/open_right/open_right',
         'topics': [
             '/joint_states',
             '/tf',

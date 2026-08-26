@@ -131,6 +131,8 @@ def launch_setup(context, *args, **kwargs):
     else:
         stamp = datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
         bag_uri = f"{recording['bag_uri']}_{stamp}"
+        # The current-step String contains JSON with both the display label and
+        # the config's ignore flag; processing uses it to filter the trajectory.
         topics = list(recording['topics']) + ['/bc_pipeline/current_step']
         recorder = ExecuteProcess(
             cmd=['ros2', 'bag', 'record',

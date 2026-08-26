@@ -40,6 +40,7 @@ RUN python3 -m pip install --no-cache-dir \
 # ROS message/transform packages required by zed-ros2-wrapper
 RUN apt-get update && apt-get install -y \
     ros-humble-geographic-msgs \
+    ros-humble-nmea-msgs \
     ros-humble-cob-srvs \
     ros-humble-robot-localization \
     ros-humble-point-cloud-transport \

@@ -20,6 +20,7 @@ server_is_ready() + spin_once() rather than wait_for_server(), which can block
 forever in Docker when topic-endpoint DDS discovery is unreliable.
 """
 
+import json
 import math
 
 import rclpy
@@ -95,10 +96,10 @@ class Context:
 
     # ── step tracking ─────────────────────────────────────────────────────────
 
-    def publish_current_step(self, step_label: str):
-        """Publish the current step being executed."""
+    def publish_current_step(self, step_label: str, ignore: bool):
+        """Publish the current step label and whether processing should ignore it."""
         msg = String()
-        msg.data = step_label
+        msg.data = json.dumps({'label': step_label, 'ignore': ignore})
         self.current_step_pub.publish(msg)
 
     # ── readiness ─────────────────────────────────────────────────────────────

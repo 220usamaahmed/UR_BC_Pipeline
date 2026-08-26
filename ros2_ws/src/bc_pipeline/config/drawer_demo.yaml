@@ -43,50 +43,62 @@ checkpoints:
 steps:
   # - type: Checkpoint
   #   checkpoint: approach
+  #   ignore: false
 
   - type: Checkpoint
     checkpoint: home
+    ignore: true
 
   - type: Checkpoint
     checkpoint: approach
+    ignore: false
     # cartesian_offset:
     #   direction: [-1, 0, 0] # base_frame vector (need not be unit; normalised)
     #   distance: 0.00 # metres
 
   # Move towards drawer: slide 14 cm along Z of the tool, orientation locked.
   - type: OrientationLockCheckpoint
+    ignore: false
     frame: tool
     axis: [0, 0, 1]
     distance: 0.14
 
   - type: Wait
     duration: 1.0
+    ignore: false
 
   - type: Gripper
     action: grip
+    ignore: false
 
   - type: Wait
     duration: 0.2
+    ignore: false
 
   - type: Gripper
     action: release
+    ignore: false
 
   # Push back: reverse the pull.
   - type: OrientationLockCheckpoint
+    ignore: false
     frame: tool
     axis: [0, 0, -1]
     distance: 0.13
 
   - type: Gripper
     action: blow
+    ignore: false
 
   - type: OrientationLockCheckpoint
+    ignore: false
     frame: tool
     axis: [0, 0, -1]
     distance: 0.01
 
   - type: Checkpoint
     checkpoint: home
+    ignore: false
 
 # Collision geometry: added to MoveIt's planning scene AND shown in Foxglove.
 # size/position are full side lengths and the box centre, in robot.base_frame.

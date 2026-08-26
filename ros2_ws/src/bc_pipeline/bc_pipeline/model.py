@@ -24,40 +24,271 @@ class Flatten(nn.Module):
         return x.flatten(self.start_dim, self.end_dim)
 
 
-class SimpleCNN(nn.ModuleList):
-    def __init__(self, in_channels: int, input_shape: Tuple[int, int], out_channels: int):
+# class SimpleCNN(nn.ModuleList):
+#     def __init__(self, in_channels: int, input_shape: Tuple[int, int], out_channels: int):
+#         super().__init__()
+
+#         self.extend(
+#             [
+#                 nn.Conv2d(in_channels, 32, kernel_size=8, stride=4),
+#                 nn.ReLU(inplace=True),
+#                 nn.Conv2d(32, 64, kernel_size=4, stride=2),
+#                 nn.ReLU(inplace=True),
+#                 nn.Conv2d(64, 32, kernel_size=3, stride=1),
+#                 Flatten(),
+#             ]
+#         )
+
+#         with torch.no_grad():
+#             test_input = torch.zeros(1, in_channels, *input_shape)
+#             flattened_dim = self.forward(test_input).size(-1)
+
+#         self.extend(
+#             [
+#                 nn.Linear(flattened_dim, out_channels),
+#                 nn.ReLU(inplace=True),
+#             ]
+#         )
+#         self.reset_parameters()
+
+#     def forward(self, x: torch.Tensor) -> torch.Tensor:
+#         for layer in self:
+#             x = layer(x)
+#         return x
+
+#     def reset_parameters(self) -> None:
+#         for module in self:
+#             if isinstance(module, (nn.Conv2d, nn.Linear)):
+#                 nn.init.kaiming_normal_(
+#                     module.weight,
+#                     nonlinearity="relu",
+#                 )
+#                 if module.bias is not None:
+#                     nn.init.zeros_(module.bias)
+
+
+# class SimpleCNN(nn.Module):
+#     """
+#     Intermediate depth-CNN architecture.
+
+#     Goal:
+#       * keep the learned CNN operating on the original 110x210 depth image,
+#       * preserve substantially more late spatial information than the previous
+#         restored CNN with AdaptiveAvgPool2d((2, 2)),
+#       * still remain much more compact than the original CNN that flattened
+#         thousands of spatial features,
+#       * keep the final depth feature dimensionality exactly 128.
+
+#     For input [B, 1, 110, 210]:
+
+#         Conv 1->16, k7, s4, p3      -> [B,16,28,53]
+#         AvgPool 2x2                 -> [B,16,14,26]
+#         Conv 16->32, k5, s2, p2    -> [B,32,7,13]
+#         Conv 32->32, k3, s2, p1    -> [B,32,4,7]
+#         Flatten                     -> [B,896]
+#         Linear 896->128 + ReLU      -> [B,128]
+
+#     Important difference from the previous restored CNN:
+#         previous: [B,32,4,7] -> AdaptiveAvgPool(2,2) -> 128 flattened values
+#         this one: [B,32,4,7] -> Flatten directly       -> 896 flattened values
+
+#     So the final compression is learned by the Linear layer rather than
+#     performing fixed 2x2 spatial averaging first.
+
+#     The strong depth augmentation settings elsewhere in this script are
+#     intentionally unchanged.
+#     """
+
+#     def __init__(
+#         self,
+#         in_channels: int,
+#         input_shape: Tuple[int, int],
+#         out_channels: int,
+#     ):
+#         super().__init__()
+
+#         if tuple(input_shape) != (110, 210):
+#             raise ValueError(
+#                 f"Expected depth input_shape=(110, 210), got {input_shape}."
+#             )
+
+#         if out_channels != 128:
+#             raise ValueError(
+#                 "This encoder is designed to output exactly 128 depth features. "
+#                 "Set depth_features_dim=128."
+#             )
+
+#         self.encoder = nn.Sequential(
+#             nn.Conv2d(
+#                 in_channels,
+#                 16,
+#                 kernel_size=7,
+#                 stride=4,
+#                 padding=3,
+#             ),
+#             nn.ReLU(inplace=True),
+
+#             nn.AvgPool2d(
+#                 kernel_size=2,
+#                 stride=2,
+#             ),
+
+#             nn.Conv2d(
+#                 16,
+#                 32,
+#                 kernel_size=5,
+#                 stride=2,
+#                 padding=2,
+#             ),
+#             nn.ReLU(inplace=True),
+
+#             nn.Conv2d(
+#                 32,
+#                 32,
+#                 kernel_size=3,
+#                 stride=2,
+#                 padding=1,
+#             ),
+#             nn.ReLU(inplace=True),
+
+#             # Preserve the full 4x7 learned spatial map.
+#             nn.Flatten(),
+
+#             # 32 x 4 x 7 = 896 learned spatial features.
+#             nn.Linear(
+#                 32 * 4 * 7,
+#                 out_channels,
+#             ),
+#             nn.ReLU(inplace=True),
+#         )
+
+#         self.reset_parameters()
+
+#     def forward(self, x: torch.Tensor) -> torch.Tensor:
+#         return self.encoder(x)
+
+#     def reset_parameters(self) -> None:
+#         for module in self.modules():
+#             if isinstance(module, (nn.Conv2d, nn.Linear)):
+#                 nn.init.kaiming_normal_(
+#                     module.weight,
+#                     nonlinearity="relu",
+#                 )
+#                 if module.bias is not None:
+#                     nn.init.zeros_(module.bias)
+
+
+class SimpleCNN(nn.Module):
+    """
+    Intermediate 2x4 depth-CNN architecture.
+
+    Goal:
+      * preserve more spatial information than the previous 2x2 bottleneck,
+      * retain substantially less exact spatial detail than the full 4x7 map,
+      * keep the final depth feature dimensionality exactly 128,
+      * keep the rest of the training pipeline unchanged.
+
+    For input [B, 1, 110, 210]:
+
+        Conv 1->16, k7, s4, p3      -> [B,16,28,53]
+        AvgPool 2x2                 -> [B,16,14,26]
+        Conv 16->32, k5, s2, p2    -> [B,32,7,13]
+        Conv 32->32, k3, s2, p1    -> [B,32,4,7]
+        AdaptiveAvgPool(2,4)        -> [B,32,2,4]
+        Flatten                     -> [B,256]
+        Linear 256->128 + ReLU      -> [B,128]
+
+    Comparison of late spatial bottlenecks:
+
+        previous compressed CNN:
+            32 x 2 x 2 = 128 flattened values
+
+        this model:
+            32 x 2 x 4 = 256 flattened values
+
+        previous full-spatial model:
+            32 x 4 x 7 = 896 flattened values
+
+    The strong depth augmentation settings elsewhere in the script are
+    intentionally unchanged.
+    """
+
+    def __init__(
+        self,
+        in_channels: int,
+        input_shape: Tuple[int, int],
+        out_channels: int,
+    ):
         super().__init__()
 
-        self.extend(
-            [
-                nn.Conv2d(in_channels, 32, kernel_size=8, stride=4),
-                nn.ReLU(inplace=True),
-                nn.Conv2d(32, 64, kernel_size=4, stride=2),
-                nn.ReLU(inplace=True),
-                nn.Conv2d(64, 32, kernel_size=3, stride=1),
-                Flatten(),
-            ]
+        if tuple(input_shape) != (110, 210):
+            raise ValueError(
+                f"Expected depth input_shape=(110, 210), got {input_shape}."
+            )
+
+        if out_channels != 128:
+            raise ValueError(
+                "This encoder is designed to output exactly 128 depth features. "
+                "Set depth_features_dim=128."
+            )
+
+        self.encoder = nn.Sequential(
+            # CNN sees the original 110x210 depth image.
+            nn.Conv2d(
+                in_channels,
+                16,
+                kernel_size=7,
+                stride=4,
+                padding=3,
+            ),
+            nn.ReLU(inplace=True),
+
+            # Moderate local smoothing/downsampling after learned convolution.
+            nn.AvgPool2d(
+                kernel_size=2,
+                stride=2,
+            ),
+
+            nn.Conv2d(
+                16,
+                32,
+                kernel_size=5,
+                stride=2,
+                padding=2,
+            ),
+            nn.ReLU(inplace=True),
+
+            nn.Conv2d(
+                32,
+                32,
+                kernel_size=3,
+                stride=2,
+                padding=1,
+            ),
+            nn.ReLU(inplace=True),
+
+            # Middle ground:
+            # preserve 2 rows x 4 columns of coarse spatial information.
+            nn.AdaptiveAvgPool2d((2, 4)),
+
+            # 32 * 2 * 4 = 256 flattened CNN features.
+            nn.Flatten(),
+
+            # Learned compression to the required 128-D representation.
+            nn.Linear(
+                32 * 2 * 4,
+                out_channels,
+            ),
+            nn.ReLU(inplace=True),
         )
 
-        with torch.no_grad():
-            test_input = torch.zeros(1, in_channels, *input_shape)
-            flattened_dim = self.forward(test_input).size(-1)
-
-        self.extend(
-            [
-                nn.Linear(flattened_dim, out_channels),
-                nn.ReLU(inplace=True),
-            ]
-        )
         self.reset_parameters()
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        for layer in self:
-            x = layer(x)
-        return x
+        return self.encoder(x)
 
     def reset_parameters(self) -> None:
-        for module in self:
+        for module in self.modules():
             if isinstance(module, (nn.Conv2d, nn.Linear)):
                 nn.init.kaiming_normal_(
                     module.weight,
@@ -253,7 +484,7 @@ class ConditionalDiffusionModel(nn.Module):
         self,
         action_dim: int = 7,
         sensor_dim: int = 7,
-        depth_features_dim: int = 512,
+        depth_features_dim: int = 128,
         hidden_dim: int = 256,
         num_layers: int = 2,
         context_length: int = 5,

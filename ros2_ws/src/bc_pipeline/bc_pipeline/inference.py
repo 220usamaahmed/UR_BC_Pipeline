@@ -141,56 +141,56 @@ def preprocess_depth(depth: np.ndarray) -> np.ndarray:
     depth = np.nan_to_num(depth, nan=10.0)
     depth = np.clip(depth, 0, 0.8)
 
-    first_box_start_x=41
-    first_box_start_y=0
-    first_box_end_x=110
-    first_box_end_y=65
+    # first_box_start_x=41
+    # first_box_start_y=0
+    # first_box_end_x=110
+    # first_box_end_y=65
 
-    second_box_start_x=41
-    second_box_start_y=140
-    second_box_end_x=110
-    second_box_end_y=210        
+    # second_box_start_x=41
+    # second_box_start_y=140
+    # second_box_end_x=110
+    # second_box_end_y=210        
 
-    object_start_x=33
-    object_start_y=98
-    object_end_x=60
-    object_end_y=125    
+    # object_start_x=33
+    # object_start_y=98
+    # object_end_x=60
+    # object_end_y=125    
     
-    first_drawer_start_x=0
-    first_drawer_start_y=0
-    first_drawer_end_x=41
-    first_drawer_end_y=65
+    # first_drawer_start_x=0
+    # first_drawer_start_y=0
+    # first_drawer_end_x=41
+    # first_drawer_end_y=65
         
-    second_drawer_start_x=0
-    second_drawer_start_y=140
-    second_drawer_end_x=41
-    second_drawer_end_y=210
+    # second_drawer_start_x=0
+    # second_drawer_start_y=140
+    # second_drawer_end_x=41
+    # second_drawer_end_y=210
     
-    depth = quantize_depth_upper_numpy_batch(depth, step=0.05)             
-    inbetween_region_first_box=depth[first_box_start_x:first_box_end_x,first_box_start_y:first_box_end_y]
+    # depth = quantize_depth_upper_numpy_batch(depth, step=0.05)             
+    # inbetween_region_first_box=depth[first_box_start_x:first_box_end_x,first_box_start_y:first_box_end_y]
     
-    inbetween_depth_value_first_box=np.percentile(inbetween_region_first_box,10)
-    depth[first_box_start_x:first_box_end_x,first_box_start_y:first_box_end_y]=inbetween_depth_value_first_box
+    # inbetween_depth_value_first_box=np.percentile(inbetween_region_first_box,10)
+    # depth[first_box_start_x:first_box_end_x,first_box_start_y:first_box_end_y]=inbetween_depth_value_first_box
     
-    inbetween_region_second_box=depth[second_box_start_x:second_box_end_x,second_box_start_y:second_box_end_y]
+    # inbetween_region_second_box=depth[second_box_start_x:second_box_end_x,second_box_start_y:second_box_end_y]
     
-    inbetween_depth_value_second_box=np.percentile(inbetween_region_second_box,10)
-    depth[second_box_start_x:second_box_end_x,second_box_start_y:second_box_end_y]=inbetween_depth_value_second_box
+    # inbetween_depth_value_second_box=np.percentile(inbetween_region_second_box,10)
+    # depth[second_box_start_x:second_box_end_x,second_box_start_y:second_box_end_y]=inbetween_depth_value_second_box
     
-    inbetween_region_first_drawer=depth[first_drawer_start_x:first_drawer_end_x,first_drawer_start_y:first_drawer_end_y]
+    # inbetween_region_first_drawer=depth[first_drawer_start_x:first_drawer_end_x,first_drawer_start_y:first_drawer_end_y]
     
-    inbetween_depth_value_first_drawer=np.percentile(inbetween_region_first_drawer,10)
-    depth[first_drawer_start_x:first_drawer_end_x,first_drawer_start_y:first_drawer_end_y]=inbetween_depth_value_first_drawer
+    # inbetween_depth_value_first_drawer=np.percentile(inbetween_region_first_drawer,10)
+    # depth[first_drawer_start_x:first_drawer_end_x,first_drawer_start_y:first_drawer_end_y]=inbetween_depth_value_first_drawer
     
-    inbetween_region_second_drawer=depth[second_drawer_start_x:second_drawer_end_x,second_drawer_start_y:second_drawer_end_y]
+    # inbetween_region_second_drawer=depth[second_drawer_start_x:second_drawer_end_x,second_drawer_start_y:second_drawer_end_y]
     
-    inbetween_depth_value_second_drawer=np.percentile(inbetween_region_second_drawer,10)
-    depth[second_drawer_start_x:second_drawer_end_x,second_drawer_start_y:second_drawer_end_y]=inbetween_depth_value_second_drawer
+    # inbetween_depth_value_second_drawer=np.percentile(inbetween_region_second_drawer,10)
+    # depth[second_drawer_start_x:second_drawer_end_x,second_drawer_start_y:second_drawer_end_y]=inbetween_depth_value_second_drawer
 
-    inbetween_region_object=depth[object_start_x:object_end_x,object_start_y:object_end_y]
+    # inbetween_region_object=depth[object_start_x:object_end_x,object_start_y:object_end_y]
     
-    inbetween_depth_value_object=np.percentile(inbetween_region_object,10)
-    depth[object_start_x:object_end_x,object_start_y:object_end_y]=inbetween_depth_value_object
+    # inbetween_depth_value_object=np.percentile(inbetween_region_object,10)
+    # depth[object_start_x:object_end_x,object_start_y:object_end_y]=inbetween_depth_value_object
 
     return depth.astype(np.float32, copy=False)
 
@@ -215,7 +215,7 @@ class Inference(Node):
         self.declare_parameter('num_candidates', 10)
         self.declare_parameter('candidate_index', 0)
         self.declare_parameter('model_action_horizon', 20)
-        self.declare_parameter('gripper_threshold', 0.5)
+        self.declare_parameter('gripper_threshold', 0.0)
         self.declare_parameter('debug_enabled', False)
         self.declare_parameter('run_id', '')
 
@@ -459,9 +459,10 @@ class Inference(Node):
         )
 
         print(f"State dict keys: {list(state_dict.keys())}")
-        
 
         model = ConditionalDiffusionModel()
+
+        print(f"Loading model dict")
         model.load_state_dict(state_dict)
         model.to(self.device)
         model.eval()
@@ -927,13 +928,17 @@ class Inference(Node):
                 velocity + next_velocity
             )
 
+        # selected = actions[
+        #     self.candidate_index, :self.action_chunk_length
+        # ].cpu().numpy() / 20.0
         selected = actions[
             self.candidate_index, :self.action_chunk_length
-        ].cpu().numpy() / 20.0
+        ].cpu().numpy()
+
         # Training multiplied all action targets by 20. Undo that
         # normalization above; the first six values are then joint deltas in
         # radians and the seventh is the gripper state.
-        joint_deltas = selected[:, :len(self.joint_names)]
+        joint_deltas = selected[:, :len(self.joint_names)] / 50.0
         gripper_states = (
             selected[:, 6] > self.gripper_threshold
         ).astype(np.uint8)
@@ -947,7 +952,7 @@ class Inference(Node):
             '\nModel joint-delta/gripper output:\n' +
             np.array2string(
                 model_output,
-                precision=6,
+                precision=2,
                 suppress_small=False,
                 separator=', ',
             )

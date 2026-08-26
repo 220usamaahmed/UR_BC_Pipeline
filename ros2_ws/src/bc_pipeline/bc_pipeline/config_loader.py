@@ -175,6 +175,11 @@ def _validate_steps(config: dict):
             raise ConfigError(
                 f"step {i} must be a mapping with a 'type' key; got {entry!r}."
             )
+        ignore = entry.setdefault('ignore', False)
+        if not isinstance(ignore, bool):
+            raise ConfigError(
+                f"step {i}.ignore must be a boolean; got {ignore!r}."
+            )
 
 
 def _validate_obstacles(config: dict):

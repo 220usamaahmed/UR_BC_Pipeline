@@ -48,6 +48,7 @@ class Step(ABC):
     def __init__(self, cfg: dict, ctx):
         self.cfg = cfg
         self.ctx = ctx
+        self.ignore = cfg['ignore']
         self.validate()
 
     def validate(self):

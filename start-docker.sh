@@ -13,6 +13,8 @@ while [[ $# -gt 0 ]]; do
         --real)
             COMPOSE_FILES=("docker-compose.yml" "docker-compose.real.yml")
             MODE="real"
+            # The real arm has a fixed address on this network.
+            export ROBOT_IP="192.168.1.102"
             shift
             ;;
         --base|--mock)
