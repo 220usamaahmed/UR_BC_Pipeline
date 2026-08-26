@@ -42,6 +42,7 @@ USAGE
 """
 
 import argparse
+import json
 import os
 import sys
 
@@ -235,47 +236,56 @@ def downsample(times: np.ndarray, positions: np.ndarray, rate_hz: float):
     return grid, positions[nearest], abs_grid
 
 
-def process_trajectory(save_kwargs: dict) -> dict:
-    """Process trajectory arrays by removing the first step if it's a Checkpoint to home.
+def decode_step_messages(step_messages: np.ndarray):
+    """Return display labels and ignore flags from recorded current-step messages.
 
-    Removes all samples that belong to the first step only if it is a Checkpoint
-    step with target "home". Otherwise returns the data unchanged.
+    Current recordings encode each String message as JSON with ``label`` and
+    ``ignore`` fields. Plain-string messages from older recordings remain
+    supported and are treated as non-ignored labels.
     """
+    labels = []
+    ignored = []
+    for index, message in enumerate(step_messages):
+        try:
+            payload = json.loads(message)
+        except json.JSONDecodeError:
+            labels.append(message)
+            ignored.append(False)
+            continue
+
+        if not isinstance(payload, dict) or not isinstance(payload.get('label'), str):
+            raise ValueError(
+                f"Invalid current-step message at index {index}: expected a JSON "
+                f"object with a string 'label'; got {message!r}.")
+        ignore = payload.get('ignore', False)
+        if not isinstance(ignore, bool):
+            raise ValueError(
+                f"Invalid current-step message at index {index}: 'ignore' must "
+                f"be a boolean; got {ignore!r}.")
+        labels.append(payload['label'])
+        ignored.append(ignore)
+
+    return np.asarray(labels), np.asarray(ignored, dtype=bool)
+
+
+def filter_ignored_samples(save_kwargs: dict, ignored: np.ndarray) -> dict:
+    """Remove all position-aligned samples whose step has ``ignore: true``."""
+    n_samples = len(save_kwargs['positions'])
+    if len(ignored) != n_samples:
+        raise ValueError(
+            f"Ignore mask has {len(ignored)} entries, but the trajectory has "
+            f"{n_samples} samples.")
+
+    keep_mask = ~ignored
+    if not np.any(keep_mask):
+        raise ValueError("All trajectory samples belong to ignored steps.")
+
     processed = save_kwargs.copy()
+    for key in ('timestamps', 'positions', 'steps', 'depth', 'is_gripping'):
+        if key in processed:
+            processed[key] = processed[key][keep_mask]
 
-    # Only process if steps are available
-    if 'steps' not in processed or len(processed['steps']) == 0:
-        return processed
-
-    first_step = processed['steps'][0]
-
-    # Only remove first step if it's a Checkpoint to home (case-insensitive)
-    first_step_lower = first_step.lower()
-    if not ('checkpoint' in first_step_lower and 'home' in first_step_lower):
-        return processed
-
-    # Remove only the contiguous first step. The same checkpoint may occur again
-    # later in the trajectory and must not be removed.
-    first_different = np.flatnonzero(processed['steps'] != first_step)
-    first_step_end = first_different[0] if len(first_different) else len(processed['steps'])
-    keep_mask = np.arange(len(processed['steps'])) >= first_step_end
-
-    # Apply mask to all position-aligned arrays
-    processed['positions'] = processed['positions'][keep_mask]
-    processed['timestamps'] = processed['timestamps'][keep_mask]
-    processed['steps'] = processed['steps'][keep_mask]
-
-    if 'depth' in processed:
-        processed['depth'] = processed['depth'][keep_mask]
-    if 'is_gripping' in processed:
-        processed['is_gripping'] = processed['is_gripping'][keep_mask]
-
-    # Recompute deltas from the filtered positions
-    if len(processed['positions']) > 1:
-        processed['deltas'] = np.diff(processed['positions'], axis=0)
-    else:
-        processed['deltas'] = np.array([]).reshape(0, processed['positions'].shape[1])
-
+    processed['deltas'] = np.diff(processed['positions'], axis=0)
     return processed
 
 
@@ -367,15 +377,17 @@ def process_single(bag_path, render=False):
     if step_topic is None:
         print(f"No {CURRENT_STEP_TOPIC} topic in this bag — skipping steps and gripper state.")
     else:
-        step_times, step_labels = read_current_steps(
+        step_times, step_messages = read_current_steps(
             bag_dir, meta['storage_id'], step_topic['name'])
         order = np.argsort(step_times)
-        step_times, step_labels = step_times[order], step_labels[order]
+        step_times, step_messages = step_times[order], step_messages[order]
+        step_labels, step_ignored = decode_step_messages(step_messages)
         print(f"Read {len(step_labels)} {step_topic['name']} messages.")
 
         # Sync steps to the same grid by holding each label until the next step starts.
         step_idx = asof_indices(step_times, abs_grid)
         down_steps = step_labels[step_idx]
+        down_ignored = step_ignored[step_idx]
         offsets = abs_grid - step_times[step_idx]
         print(f"Synced steps to the joint grid: mean offset {offsets.mean():.3f} s, "
               f"max offset {offsets.max():.3f} s.")
@@ -387,9 +399,9 @@ def process_single(bag_path, render=False):
         print(f"Built is_gripping: {n_gripping}/{len(is_gripping)} grid points with gripper active.")
 
         save_kwargs['is_gripping'] = is_gripping
-
-    # Process trajectory (e.g., remove first step)
-    save_kwargs = process_trajectory(save_kwargs)
+        n_ignored = np.sum(down_ignored)
+        save_kwargs = filter_ignored_samples(save_kwargs, down_ignored)
+        print(f"Removed {n_ignored}/{len(down_ignored)} grid points from ignored steps.")
 
     out_path = os.path.join(bag_dir, OUTPUT_NAME)
     np.savez(out_path, **save_kwargs)

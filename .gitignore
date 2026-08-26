@@ -4,6 +4,7 @@ ros2_ws/install/
 ros2_ws/log/
 ros2_ws/checkpoints/
 ros2_ws/sample_trajectories/
+ros2_ws/trajectories/
 
 # Python
 __pycache__/

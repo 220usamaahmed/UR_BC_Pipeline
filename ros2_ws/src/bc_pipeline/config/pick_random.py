@@ -65,7 +65,7 @@ CONFIG = {
          'color': [0.2, 0.5, 0.8, 0.6]},
     ],
     'recording': {
-        'bag_uri': '/data/external/trajectories/pick',
+        'bag_uri': '/root/ros2_ws/trajectories/pick/pick',
         'topics': [
             '/joint_states',
             '/tf',

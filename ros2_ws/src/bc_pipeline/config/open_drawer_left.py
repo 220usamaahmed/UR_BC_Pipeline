@@ -71,14 +71,14 @@ CONFIG = {
         {'id': 'drawer', 'size': [0.6, 0.4, 0.08], 'position': [0.0, 0.30, 0.05],
          'color': [0.2, 0.5, 0.8, 0.6]},
     ],
-    # 'recording': {
-    #     'bag_uri': '/data/external/trajectories/open_left/open_left',
-    #     'topics': [
-    #         '/joint_states',
-    #         '/tf',
-    #         '/tf_static',
-    #         '/robot_description',
-    #         '/zed/zed_node/depth/depth_registered',
-    #     ],
-    # },
+    'recording': {
+        'bag_uri': '/root/ros2_ws/trajectories/open_left/open_left',
+        'topics': [
+            '/joint_states',
+            '/tf',
+            '/tf_static',
+            '/robot_description',
+            '/zed/zed_node/depth/depth_registered',
+        ],
+    },
 }
