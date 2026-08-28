@@ -5,14 +5,14 @@ file, which resolves it into a concrete YAML before any node reads it — see
 record_sequence.launch.py.
 """
 
+import math
 import random
 
 HOME_BASE = [-90.00, 0.00, -90.00, 0.00, 90.00, -0.00]
-HOME_NOISY = [round(angle + random.uniform(-5, 5), 2) for angle in HOME_BASE]
+HOME_NOISY = [round(angle + random.uniform(-6, 6), 2) for angle in HOME_BASE]
 
-# Pick Center
-PLACE = [-63.90, 44.47, -86.37, -83.70, 90.23, 42.25]
-PLACE_NOISY = [round(angle + random.uniform(-1, 1), 2) for angle in PLACE]
+APPROACH = [-70.59, 105.89, -33.46, 5.91, 82.44, 6.08] # Right
+APPROACH_RANDOM = [round(angle + random.uniform(-2, 2), 2) for angle in APPROACH]
 
 CONFIG = {
     'robot': {
@@ -37,19 +37,15 @@ CONFIG = {
     'checkpoints': {
         'home': HOME_BASE,
         'home_noisy': HOME_NOISY,
-        'place': PLACE,
-        'place_noisy': PLACE_NOISY,
+        'approach_random': APPROACH_RANDOM,
     },
     'steps': [
         {'type': 'Wait', 'duration': 1.0, 'ignore': True},
         {'type': 'Checkpoint', 'checkpoint': 'home_noisy', 'ignore': True},
-        {'type': 'Gripper', 'action': 'grip', 'ignore': True},
-        {'type': 'Gripper', 'action': 'release', 'ignore': True},
-        {'type': 'Wait', 'duration': 1.0, 'ignore': True},
+        {'type': 'Checkpoint', 'checkpoint': 'approach_random', 'ignore': False},
 
-        {'type': 'Checkpoint', 'checkpoint': 'place', 'ignore': False},
-        {'type': 'Gripper', 'action': 'blow', 'ignore': False},
         {'type': 'Checkpoint', 'checkpoint': 'home', 'ignore': False},
+        {'type': 'Wait', 'duration': 1.0, 'ignore': True},
     ],
     'obstacles': [
         {'id': 'table', 'size': [1.2, 1.2, 0.02], 'position': [0.0, 0.0, -0.01],
@@ -62,7 +58,7 @@ CONFIG = {
          'color': [0.2, 0.5, 0.8, 0.6]},
     ],
     'recording': {
-        'bag_uri': '/root/ros2_ws/trajectories/place_right/place_right',
+        'bag_uri': '/root/ros2_ws/trajectories/open_left_failed/open_left_failed',
         'topics': [
             '/joint_states',
             '/tf',

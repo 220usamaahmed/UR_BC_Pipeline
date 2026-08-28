@@ -141,58 +141,68 @@ def preprocess_depth(depth: np.ndarray) -> np.ndarray:
     depth = np.nan_to_num(depth, nan=10.0)
     depth = np.clip(depth, 0, 0.8)
 
-    # first_box_start_x=41
-    # first_box_start_y=0
-    # first_box_end_x=110
-    # first_box_end_y=65
+    depth_zeroed = np.ones((110,210)) * 0.8
 
-    # second_box_start_x=41
-    # second_box_start_y=140
-    # second_box_end_x=110
-    # second_box_end_y=210        
+    first_box_start_x=41
+    first_box_start_y=0
+    first_box_end_x=110
+    first_box_end_y=65
 
-    # object_start_x=33
-    # object_start_y=98
-    # object_end_x=60
-    # object_end_y=125    
-    
-    # first_drawer_start_x=0
-    # first_drawer_start_y=0
-    # first_drawer_end_x=41
-    # first_drawer_end_y=65
-        
-    # second_drawer_start_x=0
-    # second_drawer_start_y=140
-    # second_drawer_end_x=41
-    # second_drawer_end_y=210
-    
-    # depth = quantize_depth_upper_numpy_batch(depth, step=0.05)             
-    # inbetween_region_first_box=depth[first_box_start_x:first_box_end_x,first_box_start_y:first_box_end_y]
-    
-    # inbetween_depth_value_first_box=np.percentile(inbetween_region_first_box,10)
-    # depth[first_box_start_x:first_box_end_x,first_box_start_y:first_box_end_y]=inbetween_depth_value_first_box
-    
-    # inbetween_region_second_box=depth[second_box_start_x:second_box_end_x,second_box_start_y:second_box_end_y]
-    
-    # inbetween_depth_value_second_box=np.percentile(inbetween_region_second_box,10)
-    # depth[second_box_start_x:second_box_end_x,second_box_start_y:second_box_end_y]=inbetween_depth_value_second_box
-    
-    # inbetween_region_first_drawer=depth[first_drawer_start_x:first_drawer_end_x,first_drawer_start_y:first_drawer_end_y]
-    
-    # inbetween_depth_value_first_drawer=np.percentile(inbetween_region_first_drawer,10)
-    # depth[first_drawer_start_x:first_drawer_end_x,first_drawer_start_y:first_drawer_end_y]=inbetween_depth_value_first_drawer
-    
-    # inbetween_region_second_drawer=depth[second_drawer_start_x:second_drawer_end_x,second_drawer_start_y:second_drawer_end_y]
-    
-    # inbetween_depth_value_second_drawer=np.percentile(inbetween_region_second_drawer,10)
-    # depth[second_drawer_start_x:second_drawer_end_x,second_drawer_start_y:second_drawer_end_y]=inbetween_depth_value_second_drawer
+    second_box_start_x=41
+    second_box_start_y=140
+    second_box_end_x=110
+    second_box_end_y=210        
 
-    # inbetween_region_object=depth[object_start_x:object_end_x,object_start_y:object_end_y]
+    object_start_x=33
+    object_start_y=98
+    object_end_x=60
+    object_end_y=125
     
-    # inbetween_depth_value_object=np.percentile(inbetween_region_object,10)
-    # depth[object_start_x:object_end_x,object_start_y:object_end_y]=inbetween_depth_value_object
+    first_drawer_start_x=0
+    first_drawer_start_y=0
+    first_drawer_end_x=41
+    first_drawer_end_y=65
+    
+    second_drawer_start_x=0
+    second_drawer_start_y=140
+    second_drawer_end_x=41
+    second_drawer_end_y=210
+    
+    depth_zeroed[first_box_start_x:first_box_end_x,first_box_start_y:first_box_end_y]=0.65
+    depth_zeroed[second_box_start_x:second_box_end_x,second_box_start_y:second_box_end_y]=0.65
+    
+    inbetween_region_first_drawer=depth[first_drawer_start_x:first_drawer_end_x,first_drawer_start_y:first_drawer_end_y]
+    
+    inbetween_depth_value_first_drawer=np.percentile(inbetween_region_first_drawer,10)
+    if inbetween_depth_value_first_drawer <0.7:
+        inbetween_depth_value_first_drawer=0.65
+    else:
+        inbetween_depth_value_first_drawer=0.8
+    # print(f"inbetween_depth_value_first_drawer: {inbetween_depth_value_first_drawer}")
+    depth_zeroed[first_drawer_start_x:first_drawer_end_x,first_drawer_start_y:first_drawer_end_y] = inbetween_depth_value_first_drawer
 
-    return depth.astype(np.float32, copy=False)
+    inbetween_region_second_drawer=depth[second_drawer_start_x:second_drawer_end_x,second_drawer_start_y:second_drawer_end_y]
+    
+    inbetween_depth_value_second_drawer=np.percentile(inbetween_region_second_drawer,10)
+    if inbetween_depth_value_second_drawer <0.7:
+        inbetween_depth_value_second_drawer=0.65
+    else:
+        inbetween_depth_value_second_drawer=0.8
+    # print(f"inbetween_depth_value_second_drawer: {inbetween_depth_value_second_drawer}")
+    depth_zeroed[second_drawer_start_x:second_drawer_end_x,second_drawer_start_y:second_drawer_end_y]=inbetween_depth_value_second_drawer
+
+
+    inbetween_region_object=depth[object_start_x:object_end_x,object_start_y:object_end_y]
+    
+    inbetween_depth_value_object=np.percentile(inbetween_region_object,10)
+    if inbetween_depth_value_object <0.76:
+        inbetween_depth_value_object=0.65
+    else:
+        inbetween_depth_value_object=0.8  
+    # print(f"inbetween_depth_value_object: {inbetween_depth_value_object}")          
+    depth_zeroed[object_start_x:object_end_x,object_start_y:object_end_y]=inbetween_depth_value_object
+
+    return depth_zeroed.astype(np.float32, copy=False)
 
 
 class Inference(Node):
@@ -205,7 +215,7 @@ class Inference(Node):
         self.declare_parameter('action_chunk_length', 10)
         self.declare_parameter('rate_hz', 20.0)
         self.declare_parameter('sync_tolerance_sec', 0.05)
-        self.declare_parameter('joint_match_tolerance_rad', 0.1)
+        self.declare_parameter('joint_match_tolerance_rad', 0.15)
         self.declare_parameter('grip_release_delay_sec', 0.5)
         self.declare_parameter('home_position', DEFAULT_HOME_POSITION)
         self.declare_parameter('home_move_sec', 5.0)

@@ -1,6 +1,4 @@
 """
-Same experiment as drawer_demo.yaml, but in Python format for data augmentation.
-
 This is the .py convention: a module-level CONFIG dict, built with whatever
 Python you need (math, random, loops, ...). It's executed once by the launch
 file, which resolves it into a concrete YAML before any node reads it — see
