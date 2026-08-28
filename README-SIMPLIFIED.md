@@ -3,6 +3,8 @@
 # Start docker container
 ./start-docker.sh --real
 
+# Press start on robot
+
 # Exec into container
 ./start-docker.sh exec bash
 
@@ -16,3 +18,5 @@ ros2 launch bc_pipeline record_sequence.launch.py config:=place_left.py
 cd /root/ros2_ws/src/processing
 python3 make_training_trajectory.py /root/ros2_ws/trajectories/place_left/ --batch && python3 visualize_run.py /root/ros2_ws/trajectories/place_left/ --batch
 
+# Run inference
+ros2 run bc_pipeline inference --ros-args -p checkpoint_path:=checkpoints/...
